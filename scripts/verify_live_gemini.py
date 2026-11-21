@@ -1,9 +1,9 @@
 """Verification script for live Gemini API integration against local CivicResolve server."""
 
 import base64
-from datetime import datetime
 import io
 import json
+from datetime import datetime
 from typing import Any
 
 import httpx
