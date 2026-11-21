@@ -3,6 +3,7 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
@@ -13,18 +14,32 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.admin_routes import router as admin_router
 from app.api.public_routes import router as public_router
-from app.config import get_settings
+from app.config import DEFAULT_DEMO_ADMIN_PASSWORD, get_settings
+from app.domain.errors import (
+    AuthError,
+    CivicResolveError,
+    InvalidTransitionError,
+    NotFoundError,
+    UpstreamError,
+)
+from app.domain.errors import (
+    ValidationError as DomainValidationError,
+)
+from app.security_headers import BASE_SECURITY_HEADERS
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application startup and shutdown lifecycle."""
     settings = get_settings()
-    if settings.is_production and not settings.demo_mode:
-        if settings.admin_password == "civic-demo-2026":
-            raise RuntimeError(
-                "CRITICAL: Default admin password must be changed in live production environment!"
-            )
+    if (
+        settings.is_production
+        and not settings.demo_mode
+        and settings.admin_password == DEFAULT_DEMO_ADMIN_PASSWORD
+    ):
+        raise RuntimeError(
+            "CRITICAL: Default admin password must be changed in live production environment!"
+        )
     yield
 
 
@@ -53,8 +68,8 @@ app.add_middleware(
 
 # 3. Security Headers and Request Size Guard Middleware
 @app.middleware("http")
-async def security_and_size_guard(request: Request, call_next):
-    # Guard against oversized payloads (> 600 KB)
+async def security_and_size_guard(request: Request, call_next: Any) -> Response:
+    """Enforce payload size bounds and inject single-source hardening security headers."""
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > 614_400:
         return JSONResponse(
@@ -64,15 +79,9 @@ async def security_and_size_guard(request: Request, call_next):
 
     response: Response = await call_next(request)
 
-    # Inject hardening security headers
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Permissions-Policy"] = "geolocation=(self)"
-    response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none';"
-    )
+    # Inject baseline hardening security headers
+    for header_name, header_value in BASE_SECURITY_HEADERS.items():
+        response.headers[header_name] = header_value
 
     # Disable caching on admin routes
     if request.url.path.startswith("/api/admin"):
@@ -81,9 +90,32 @@ async def security_and_size_guard(request: Request, call_next):
     return response
 
 
-# 4. Custom validation error formatting
+# 4. Domain Exception Handler mapping domain errors to HTTP status codes
+@app.exception_handler(CivicResolveError)
+async def domain_exception_handler(_request: Request, exc: CivicResolveError) -> JSONResponse:
+    """Map typed domain exceptions to appropriate HTTP status responses."""
+    status_code = status.HTTP_400_BAD_REQUEST
+    if isinstance(exc, NotFoundError):
+        status_code = status.HTTP_404_NOT_FOUND
+    elif isinstance(exc, InvalidTransitionError):
+        status_code = status.HTTP_400_BAD_REQUEST
+    elif isinstance(exc, DomainValidationError):
+        status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
+    elif isinstance(exc, AuthError):
+        status_code = status.HTTP_401_UNAUTHORIZED
+    elif isinstance(exc, UpstreamError):
+        status_code = status.HTTP_502_BAD_GATEWAY
+
+    return JSONResponse(
+        status_code=status_code,
+        content={"detail": exc.message},
+    )
+
+
+# 5. Custom validation error formatting
 @app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
+async def validation_exception_handler(_request: Request, exc: RequestValidationError) -> JSONResponse:
+    """Format Pydantic schema validation failures into user-readable errors."""
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
@@ -96,11 +128,11 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 
-# 5. Mount API Routers
+# 6. Mount API Routers
 app.include_router(public_router)
 app.include_router(admin_router)
 
-# 6. Static files mount for local development
+# 7. Static files mount for local development
 public_dir = Path(__file__).resolve().parent.parent / "public"
 if public_dir.exists():
     app.mount("/", StaticFiles(directory=str(public_dir), html=True), name="public")

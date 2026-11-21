@@ -78,6 +78,47 @@ def classify_text_heuristically(text: str) -> tuple[IssueCategory, float]:
     return top_cat, confidence
 
 
+def _resolve_category(user_category: str | None, text: str) -> tuple[IssueCategory, float]:
+    """Resolve category from citizen selection or heuristic scan."""
+    if user_category and user_category != "Let AI decide":
+        try:
+            return IssueCategory(user_category), 0.85
+        except ValueError:
+            return classify_text_heuristically(text)
+    return classify_text_heuristically(text)
+
+
+def _detect_urgency_and_safety(lower_text: str) -> tuple[str, int, bool]:
+    """Determine urgency level, impact tier, and safety risk from keywords."""
+    is_critical = any(
+        k in lower_text
+        for k in ["live wire", "spark", "burst", "bursting", "urgent", "danger", "hazard", "fire", "emergency", "மின்கம்பி", "बिजली"]
+    )
+    if is_critical:
+        return "Critical", 4, True
+
+    is_high = any(
+        k in lower_text
+        for k in ["crater", "overflow", "flooding", "blackwater", "stench", "accident", "school", "hospital", "குழி", "गड्ढा"]
+    )
+    if is_high:
+        return "High", 3, True
+
+    return "Medium", 2, False
+
+
+def _extract_risk_factors(safety: bool, lower_text: str) -> list[str]:
+    """Derive list of contextual risk tags from text."""
+    factors = []
+    if safety:
+        factors.append("Safety hazard detected")
+    if "school" in lower_text:
+        factors.append("School zone proximity")
+    if "main road" in lower_text or "flyover" in lower_text:
+        factors.append("High transit road")
+    return factors
+
+
 def run_fallback_triage(
     description: str,
     title: str | None = None,
@@ -85,45 +126,18 @@ def run_fallback_triage(
 ) -> AIAnalysis:
     """Produce comprehensive structured triage using deterministic rules."""
     text = f"{title or ''} {description}".strip()
+    category, confidence = _resolve_category(user_category, text)
 
-    if user_category and user_category != "Let AI decide":
-        try:
-            category = IssueCategory(user_category)
-            confidence = 0.85
-        except ValueError:
-            category, confidence = classify_text_heuristically(text)
-    else:
-        category, confidence = classify_text_heuristically(text)
-
-    # Detect urgency
     lower_text = text.lower()
-    is_critical = any(k in lower_text for k in ["live wire", "spark", "burst", "bursting", "urgent", "danger", "hazard", "fire", "emergency", "மின்கம்பி", "बिजली"])
-    is_high = any(k in lower_text for k in ["crater", "overflow", "flooding", "blackwater", "stench", "accident", "school", "hospital", "குழி", "गड्ढा"])
-
-    if is_critical:
-        urgency = "Critical"
-        impact = 4
-        safety = True
-    elif is_high:
-        urgency = "High"
-        impact = 3
-        safety = True
-    else:
-        urgency = "Medium"
-        impact = 2
-        safety = False
-
+    urgency, impact, safety = _detect_urgency_and_safety(lower_text)
     department = get_default_department(category).value
-    suggested_title = title if (title and len(title.strip()) > 5) else f"{category.value} reported by citizen"
-    summary = (description[:190] + "...") if len(description) > 190 else description
 
-    risk_factors = []
-    if safety:
-        risk_factors.append("Safety hazard detected")
-    if "school" in lower_text:
-        risk_factors.append("School zone proximity")
-    if "main road" in lower_text or "flyover" in lower_text:
-        risk_factors.append("High transit road")
+    suggested_title = (
+        title if (title and len(title.strip()) > 5)
+        else f"{category.value} reported by citizen"
+    )
+    summary = (description[:190] + "...") if len(description) > 190 else description
+    risk_factors = _extract_risk_factors(safety, lower_text)
 
     return AIAnalysis(
         category=category.value,

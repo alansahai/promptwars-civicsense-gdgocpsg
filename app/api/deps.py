@@ -9,8 +9,10 @@ from fastapi import Depends, HTTPException, Request, status
 from app.config import Settings, get_settings
 from app.repositories.base import IssueRepository
 from app.repositories.factory import get_repository
+from app.services.analytics_service import AnalyticsService
 from app.services.auth import AuthService
 from app.services.issue_service import IssueService
+from app.services.stats_service import StatsService
 
 
 class SlidingWindowRateLimiter:
@@ -21,15 +23,14 @@ class SlidingWindowRateLimiter:
         self.window_seconds = window_seconds
         self.history: dict[str, list[float]] = defaultdict(list)
 
-    def is_allowed(self, client_ip: str) -> bool:
+    def is_allowed(self, ip_address: str) -> bool:
         """Check and update request timestamp log for client IP."""
         now = time.time()
         cutoff = now - self.window_seconds
-        # Clean older entries
-        self.history[client_ip] = [t for t in self.history[client_ip] if t > cutoff]
-        if len(self.history[client_ip]) >= self.max_requests:
+        self.history[ip_address] = [t for t in self.history[ip_address] if t > cutoff]
+        if len(self.history[ip_address]) >= self.max_requests:
             return False
-        self.history[client_ip].append(now)
+        self.history[ip_address].append(now)
         return True
 
 
@@ -39,17 +40,28 @@ login_rate_limiter = SlidingWindowRateLimiter(max_requests=6, window_seconds=300
 general_rate_limiter = SlidingWindowRateLimiter(max_requests=120, window_seconds=60)
 
 
-def get_client_ip(request: Request) -> str:
-    """Extract client IP handling forward headers."""
+def client_ip(request: Request) -> str:
+    """Extract verified client IP address handling Vercel and reverse-proxy headers."""
+    vercel_ip = request.headers.get("x-vercel-forwarded-for")
+    if vercel_ip:
+        return vercel_ip.split(",")[0].strip()
+
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
-        return forwarded.split(",")[0].strip()
+        parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+        if parts:
+            return parts[0]
+
     return request.client.host if request.client else "127.0.0.1"
+
+
+# Backward-compatible alias
+get_client_ip = client_ip
 
 
 def rate_limit_reports(request: Request) -> None:
     """Enforce rate limits on issue creation."""
-    ip = get_client_ip(request)
+    ip = client_ip(request)
     if not report_rate_limiter.is_allowed(ip):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -59,7 +71,7 @@ def rate_limit_reports(request: Request) -> None:
 
 def rate_limit_login(request: Request) -> None:
     """Enforce rate limits on administrative login attempts."""
-    ip = get_client_ip(request)
+    ip = client_ip(request)
     if not login_rate_limiter.is_allowed(ip):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -78,6 +90,16 @@ def get_auth_service(settings: Annotated[Settings, Depends(get_settings)]) -> Au
 def get_issue_service(repo: Annotated[IssueRepository, Depends(get_repository)]) -> IssueService:
     """Return configured IssueService."""
     return IssueService(repo)
+
+
+def get_stats_service(repo: Annotated[IssueRepository, Depends(get_repository)]) -> StatsService:
+    """Return configured StatsService."""
+    return StatsService(repo)
+
+
+def get_analytics_service(repo: Annotated[IssueRepository, Depends(get_repository)]) -> AnalyticsService:
+    """Return configured AnalyticsService."""
+    return AnalyticsService(repo)
 
 
 def require_admin_auth(

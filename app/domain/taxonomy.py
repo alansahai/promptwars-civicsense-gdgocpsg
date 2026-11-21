@@ -50,8 +50,7 @@ CATEGORY_ROUTING: Final[dict[IssueCategory, Department]] = {
     IssueCategory.OTHER: Department.GENERAL_GRIEVANCE,
 }
 
-# SLA in hours based on (Category, Priority Level)
-# Priority levels: "Critical", "High", "Medium", "Low"
+# Standard SLA matrix in hours based on (Priority, Category)
 SLA_MATRIX_HOURS: Final[dict[tuple[str, str], int]] = {
     ("Critical", "Exposed Live Wire"): 4,
     ("Critical", "Sewage Overflow"): 6,
@@ -65,19 +64,18 @@ SLA_MATRIX_HOURS: Final[dict[tuple[str, str], int]] = {
 
 def get_default_department(category: IssueCategory | str) -> Department:
     """Return the designated department for a civic category."""
-    try:
-        cat_enum = IssueCategory(category)
-        return CATEGORY_ROUTING.get(cat_enum, Department.GENERAL_GRIEVANCE)
-    except ValueError:
-        return Department.GENERAL_GRIEVANCE
+    if isinstance(category, str):
+        try:
+            category = IssueCategory(category)
+        except ValueError:
+            return Department.GENERAL_GRIEVANCE
+    return CATEGORY_ROUTING.get(category, Department.GENERAL_GRIEVANCE)
 
 
 def get_sla_hours(priority: str, category: IssueCategory | str) -> int:
     """Compute standard resolution SLA in hours for priority and category."""
-    cat_str = str(category)
-    if (priority, cat_str) in SLA_MATRIX_HOURS:
-        return SLA_MATRIX_HOURS[(priority, cat_str)]
-    return SLA_MATRIX_HOURS.get((priority, "*"), 48)
+    cat_str = category.value if isinstance(category, IssueCategory) else str(category)
+    return SLA_MATRIX_HOURS.get((priority, cat_str), SLA_MATRIX_HOURS.get((priority, "*"), 48))
 
 
 def is_valid_department_for_category(category: str, department: str) -> bool:
@@ -85,25 +83,19 @@ def is_valid_department_for_category(category: str, department: str) -> bool:
     try:
         cat_enum = IssueCategory(category)
         dept_enum = Department(department)
-        expected = CATEGORY_ROUTING.get(cat_enum)
-        if dept_enum == expected:
-            return True
-        # Cross-department plausible cases
-        if cat_enum in {IssueCategory.GARBAGE, IssueCategory.ILLEGAL_DUMPING} and dept_enum in {
-            Department.SOLID_WASTE,
-            Department.ENVIRONMENTAL_SAFETY,
-        }:
-            return True
-        if cat_enum == IssueCategory.EXPOSED_WIRE and dept_enum in {
-            Department.ELECTRICITY,
-            Department.ROADS,
-        }:
-            return True
-        if cat_enum in {IssueCategory.WATER_LEAK, IssueCategory.SEWAGE_OVERFLOW} and dept_enum in {
-            Department.WATER_SEWAGE,
-            Department.ROADS,
-        }:
-            return True
-        return dept_enum == Department.GENERAL_GRIEVANCE
     except ValueError:
         return False
+
+    expected = CATEGORY_ROUTING.get(cat_enum)
+    if dept_enum in {expected, Department.GENERAL_GRIEVANCE}:
+        return True
+
+    # Plausible cross-department assignments
+    cross_routing: dict[IssueCategory, set[Department]] = {
+        IssueCategory.GARBAGE: {Department.ENVIRONMENTAL_SAFETY},
+        IssueCategory.ILLEGAL_DUMPING: {Department.ENVIRONMENTAL_SAFETY},
+        IssueCategory.EXPOSED_WIRE: {Department.ROADS},
+        IssueCategory.WATER_LEAK: {Department.ROADS},
+        IssueCategory.SEWAGE_OVERFLOW: {Department.ROADS},
+    }
+    return dept_enum in cross_routing.get(cat_enum, set())

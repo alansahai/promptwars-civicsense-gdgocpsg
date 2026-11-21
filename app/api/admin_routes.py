@@ -5,16 +5,20 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from app.api.deps import (
+    get_analytics_service,
     get_auth_service,
     get_issue_service,
+    get_stats_service,
     rate_limit_login,
     require_admin_auth,
 )
 from app.config import Settings, get_settings
 from app.schemas import AdminLoginRequest, IssueUpdateRequest
+from app.services.analytics_service import AnalyticsService
 from app.services.auth import AuthService
 from app.services.issue_service import IssueService
 from app.services.llm import generate_executive_summary
+from app.services.stats_service import StatsService
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -34,8 +38,6 @@ async def admin_login(
         )
 
     token = auth_service.create_session_token("admin")
-
-    # Set httpOnly, SameSite=Strict, Secure cookie
     response.set_cookie(
         key="civic_session",
         value=token,
@@ -44,7 +46,6 @@ async def admin_login(
         samesite="strict",
         secure=settings.is_production,
     )
-
     return {
         "status": "authenticated",
         "token": token,
@@ -79,28 +80,17 @@ async def update_issue_details(
     issue_service: Annotated[IssueService, Depends(get_issue_service)],
 ) -> dict[str, Any]:
     """Update issue status or apply administrative classification overrides."""
-    try:
-        updated = await issue_service.update_issue_status(
-            ticket_id=ticket_id,
-            new_status=payload.status,
-            author="Admin Officer",
-            note=payload.note or "",
-            category_override=payload.category_override,
-            priority_override=payload.priority_override,
-            department_override=payload.department_override,
-            duplicate_of=payload.duplicate_of,
-        )
-        return updated.to_dict()
-    except KeyError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Ticket {ticket_id} not found",
-        ) from exc
-    except ValueError as val_err:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(val_err),
-        ) from val_err
+    updated = await issue_service.update_issue_status(
+        ticket_id=ticket_id,
+        new_status=payload.status,
+        author="Admin Officer",
+        note=payload.note or "",
+        category_override=payload.category_override,
+        priority_override=payload.priority_override,
+        department_override=payload.department_override,
+        duplicate_of=payload.duplicate_of,
+    )
+    return updated.to_dict()
 
 
 @router.post("/issues/{ticket_id}/reanalyze", dependencies=[Depends(require_admin_auth)])
@@ -109,31 +99,26 @@ async def reanalyze_issue(
     issue_service: Annotated[IssueService, Depends(get_issue_service)],
 ) -> dict[str, Any]:
     """Re-execute automated triage on an existing grievance."""
-    try:
-        reanalyzed = await issue_service.reanalyze_issue(ticket_id)
-        return reanalyzed.to_dict()
-    except KeyError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Ticket {ticket_id} not found",
-        ) from exc
+    reanalyzed = await issue_service.reanalyze_issue(ticket_id)
+    return reanalyzed.to_dict()
 
 
 @router.get("/analytics", dependencies=[Depends(require_admin_auth)])
-async def get_admin_analytics(
-    issue_service: Annotated[IssueService, Depends(get_issue_service)],
+async def get_admin_analytics_endpoint(
+    analytics_service: Annotated[AnalyticsService, Depends(get_analytics_service)],
 ) -> dict[str, Any]:
     """Retrieve administrative analytics including department workloads and overdue SLAs."""
-    return await issue_service.get_admin_analytics()
+    return await analytics_service.get_admin_analytics()
 
 
 @router.post("/summary", dependencies=[Depends(require_admin_auth)])
 async def create_executive_summary(
-    issue_service: Annotated[IssueService, Depends(get_issue_service)],
+    stats_service: Annotated[StatsService, Depends(get_stats_service)],
+    analytics_service: Annotated[AnalyticsService, Depends(get_analytics_service)],
 ) -> dict[str, Any]:
     """Generate Gemini executive summary grounded in operational statistics."""
-    stats = await issue_service.get_public_stats()
-    analytics = await issue_service.get_admin_analytics()
+    stats = await stats_service.get_public_stats()
+    analytics = await analytics_service.get_admin_analytics()
     combined = {**stats, **analytics}
 
     summary = await generate_executive_summary(combined)

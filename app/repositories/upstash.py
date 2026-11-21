@@ -14,6 +14,82 @@ from app.domain.models import AIAnalysis, Issue, PriorityFactor, StatusHistoryIt
 from app.repositories.base import IssueRepository
 
 
+def _deserialize_ai_analysis(ai_data: dict[str, Any] | None) -> AIAnalysis | None:
+    """Deserialize AIAnalysis domain model from dictionary payload."""
+    if not ai_data:
+        return None
+    return AIAnalysis(
+        category=ai_data["category"],
+        suggested_title=ai_data["suggested_title"],
+        summary=ai_data["summary"],
+        detected_language=ai_data["detected_language"],
+        urgency=ai_data["urgency"],
+        public_impact=ai_data["public_impact"],
+        safety_risk=ai_data["safety_risk"],
+        risk_factors=ai_data["risk_factors"],
+        recommended_department=ai_data["recommended_department"],
+        confidence=ai_data["confidence"],
+        reasoning=ai_data["reasoning"],
+        clarifying_questions=ai_data.get("clarifying_questions", []),
+        citizen_acknowledgement=ai_data.get("citizen_acknowledgement", ""),
+        photo_observations=ai_data.get("photo_observations"),
+        ai_generated=ai_data.get("ai_generated", True),
+        analysis_source=ai_data.get("analysis_source", "gemini"),
+    )
+
+
+def _deserialize_history(history_data: list[dict[str, Any]]) -> list[StatusHistoryItem]:
+    """Deserialize list of StatusHistoryItem models from dictionaries."""
+    return [
+        StatusHistoryItem(
+            status=h["status"],
+            timestamp=datetime.fromisoformat(h["timestamp"]),
+            author=h.get("author", "System"),
+            note=h.get("note", ""),
+            is_public=h.get("is_public", True),
+        )
+        for h in history_data
+    ]
+
+
+def _matches_criteria(
+    i: Issue,
+    status: str | None,
+    category: str | None,
+    priority: str | None,
+    department: str | None,
+    search: str | None,
+) -> bool:
+    """Check if issue matches all given query filters."""
+    if status and i.status.lower() != status.lower():
+        return False
+    if category and i.category.lower() != category.lower():
+        return False
+    if priority and i.priority_level.lower() != priority.lower():
+        return False
+    if department and i.department.lower() != department.lower():
+        return False
+    if search:
+        searchable = f"{i.ticket_id} {i.title} {i.description} {i.address or ''}".lower()
+        if search.lower() not in searchable:
+            return False
+    return True
+
+
+def _paginate_list(filtered: list[Issue], limit: int, cursor: str | None) -> tuple[list[Issue], str | None]:
+    """Slice items based on cursor ticket_id and limit."""
+    start_idx = 0
+    if cursor:
+        for idx, it in enumerate(filtered):
+            if it.ticket_id == cursor:
+                start_idx = idx + 1
+                break
+    page = filtered[start_idx : start_idx + limit]
+    has_more = len(page) == limit and (start_idx + limit) < len(filtered)
+    next_cursor = page[-1].ticket_id if has_more else None
+    return page, next_cursor
+
+
 class UpstashRedisRepository(IssueRepository):
     """Upstash Redis repository utilizing REST API endpoints."""
 
@@ -32,11 +108,43 @@ class UpstashRedisRepository(IssueRepository):
             raise RuntimeError(f"Upstash error: {data['error']}")
         return data.get("result")
 
+    def _dict_to_issue(self, data: dict[str, Any]) -> Issue:
+        """Helper to reconstruct Issue from dictionary."""
+        factors = [
+            PriorityFactor(f["factor"], f["points"], f["explanation"])
+            for f in data.get("priority_breakdown", [])
+        ]
+        resolved = datetime.fromisoformat(data["resolved_at"]) if data.get("resolved_at") else None
+        return Issue(
+            ticket_id=data["ticket_id"],
+            title=data["title"],
+            description=data["description"],
+            category=data["category"],
+            department=data["department"],
+            priority_level=data["priority_level"],
+            priority_score=data["priority_score"],
+            sla_hours=data["sla_hours"],
+            status=data["status"],
+            created_at=datetime.fromisoformat(data["created_at"]),
+            updated_at=datetime.fromisoformat(data["updated_at"]),
+            address=data.get("address"),
+            latitude=data.get("latitude"),
+            longitude=data.get("longitude"),
+            citizen_name=data.get("citizen_name"),
+            has_photo=data.get("has_photo", False),
+            ai_analysis=_deserialize_ai_analysis(data.get("ai_analysis")),
+            priority_breakdown=factors,
+            status_history=_deserialize_history(data.get("status_history", [])),
+            duplicate_of=data.get("duplicate_of"),
+            admin_override=data.get("admin_override", False),
+            admin_notes=data.get("admin_notes"),
+            resolved_at=resolved,
+        )
+
     async def save_issue(self, issue: Issue) -> None:
         """Save issue serialized as JSON into Redis."""
         key = f"issue:{issue.ticket_id}"
         serialized = json.dumps(issue.to_dict())
-        # Store issue record and add to all_tickets set
         await self._execute_command("SET", key, serialized)
         await self._execute_command("SADD", "tickets:all", issue.ticket_id)
 
@@ -70,29 +178,11 @@ class UpstashRedisRepository(IssueRepository):
                 issues.append(issue)
 
         issues.sort(key=lambda x: (x.priority_score, x.created_at), reverse=True)
-
         filtered = [
             i for i in issues
-            if (not status or i.status.lower() == status.lower())
-            and (not category or i.category.lower() == category.lower())
-            and (not priority or i.priority_level.lower() == priority.lower())
-            and (not department or i.department.lower() == department.lower())
-            and (
-                not search
-                or search.lower() in f"{i.ticket_id} {i.title} {i.description} {i.address or ''}".lower()
-            )
+            if _matches_criteria(i, status, category, priority, department, search)
         ]
-
-        start_idx = 0
-        if cursor:
-            for idx, it in enumerate(filtered):
-                if it.ticket_id == cursor:
-                    start_idx = idx + 1
-                    break
-
-        page = filtered[start_idx : start_idx + limit]
-        next_cursor = page[-1].ticket_id if len(page) == limit and (start_idx + limit) < len(filtered) else None
-        return page, next_cursor
+        return _paginate_list(filtered, limit, cursor)
 
     async def update_issue(self, issue: Issue) -> None:
         """Update an existing issue."""
@@ -121,69 +211,3 @@ class UpstashRedisRepository(IssueRepository):
             if raw:
                 raw_list.append(json.loads(raw))
         return raw_list
-
-    def _dict_to_issue(self, data: dict[str, Any]) -> Issue:
-        """Helper to reconstruct Issue from dictionary."""
-        ai_data = data.get("ai_analysis")
-        ai_obj = None
-        if ai_data:
-            ai_obj = AIAnalysis(
-                category=ai_data["category"],
-                suggested_title=ai_data["suggested_title"],
-                summary=ai_data["summary"],
-                detected_language=ai_data["detected_language"],
-                urgency=ai_data["urgency"],
-                public_impact=ai_data["public_impact"],
-                safety_risk=ai_data["safety_risk"],
-                risk_factors=ai_data["risk_factors"],
-                recommended_department=ai_data["recommended_department"],
-                confidence=ai_data["confidence"],
-                reasoning=ai_data["reasoning"],
-                clarifying_questions=ai_data.get("clarifying_questions", []),
-                citizen_acknowledgement=ai_data.get("citizen_acknowledgement", ""),
-                photo_observations=ai_data.get("photo_observations"),
-                ai_generated=ai_data.get("ai_generated", True),
-                analysis_source=ai_data.get("analysis_source", "gemini"),
-            )
-
-        factors = [
-            PriorityFactor(f["factor"], f["points"], f["explanation"])
-            for f in data.get("priority_breakdown", [])
-        ]
-
-        history = [
-            StatusHistoryItem(
-                status=h["status"],
-                timestamp=datetime.fromisoformat(h["timestamp"]),
-                author=h.get("author", "System"),
-                note=h.get("note", ""),
-                is_public=h.get("is_public", True),
-            )
-            for h in data.get("status_history", [])
-        ]
-
-        return Issue(
-            ticket_id=data["ticket_id"],
-            title=data["title"],
-            description=data["description"],
-            category=data["category"],
-            department=data["department"],
-            priority_level=data["priority_level"],
-            priority_score=data["priority_score"],
-            sla_hours=data["sla_hours"],
-            status=data["status"],
-            created_at=datetime.fromisoformat(data["created_at"]),
-            updated_at=datetime.fromisoformat(data["updated_at"]),
-            address=data.get("address"),
-            latitude=data.get("latitude"),
-            longitude=data.get("longitude"),
-            citizen_name=data.get("citizen_name"),
-            has_photo=data.get("has_photo", False),
-            ai_analysis=ai_obj,
-            priority_breakdown=factors,
-            status_history=history,
-            duplicate_of=data.get("duplicate_of"),
-            admin_override=data.get("admin_override", False),
-            admin_notes=data.get("admin_notes"),
-            resolved_at=datetime.fromisoformat(data["resolved_at"]) if data.get("resolved_at") else None,
-        )

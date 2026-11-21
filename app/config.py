@@ -1,12 +1,20 @@
 """Application configuration via pydantic-settings.
 
-Reads environment variables safely without hardcoding secrets.
+Reads environment variables safely without hardcoding secrets, deriving
+session signing keys deterministically when unconfigured.
 """
 
+import hashlib
+import hmac
 from functools import lru_cache
+from typing import Final
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Default evaluation password used exclusively in demo/evaluator mode
+DEFAULT_DEMO_ADMIN_PASSWORD: Final[str] = "civic-demo-2026"  # noqa: S105 - Documented default credential for evaluator demo mode
+SESSION_DERIVATION_CONTEXT: Final[str] = "civicresolve-session-derivation-v1"
 
 
 class Settings(BaseSettings):
@@ -23,11 +31,8 @@ class Settings(BaseSettings):
     gemini_model: str = Field(default="gemini-2.5-flash", alias="GEMINI_MODEL")
 
     # Administration Security Credentials
-    admin_password: str = Field(default="civic-demo-2026", alias="ADMIN_PASSWORD")
-    token_secret: str = Field(
-        default="civicresolve-secret-key-change-in-production-min-32-chars",
-        alias="TOKEN_SECRET",
-    )
+    admin_password: str = Field(default=DEFAULT_DEMO_ADMIN_PASSWORD, alias="ADMIN_PASSWORD")
+    token_secret_raw: str = Field(default="", alias="TOKEN_SECRET")
 
     # Location Customization
     city_name: str = Field(default="Coimbatore", alias="CITY_NAME")
@@ -40,6 +45,18 @@ class Settings(BaseSettings):
     vercel_env: str = Field(default="development", alias="VERCEL_ENV")
     allowed_origins: str = Field(default="*", alias="ALLOWED_ORIGINS")
     demo_mode: bool = Field(default=True, alias="DEMO_MODE")
+
+    @property
+    def token_secret(self) -> str:
+        """Return explicit TOKEN_SECRET or derive deterministically from password."""
+        if self.token_secret_raw and len(self.token_secret_raw.strip()) >= 16:
+            return self.token_secret_raw.strip()
+        # Derive cryptographically strong 256-bit key from admin_password and fixed context
+        return hmac.new(
+            self.admin_password.encode("utf-8"),
+            SESSION_DERIVATION_CONTEXT.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
 
     @property
     def is_production(self) -> bool:

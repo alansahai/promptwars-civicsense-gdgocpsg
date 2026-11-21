@@ -5,15 +5,38 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.api.deps import get_issue_service, rate_limit_reports
+from app.api.deps import get_issue_service, get_stats_service, rate_limit_reports
 from app.config import Settings, get_settings
 from app.schemas import AssistRequest, HealthResponse, IssueCreateRequest
 from app.services.issue_service import IssueService
 from app.services.llm import generate_assistance
+from app.services.stats_service import StatsService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["public"])
+
+
+class IssueFilterParams:
+    """Query parameter filter bundle for issue listing."""
+
+    def __init__(
+        self,
+        status: str | None = Query(default=None),
+        category: str | None = Query(default=None),
+        priority: str | None = Query(default=None),
+        department: str | None = Query(default=None),
+        search: str | None = Query(default=None),
+        limit: int = Query(default=20, ge=1, le=100),
+        cursor: str | None = Query(default=None),
+    ) -> None:
+        self.status = status
+        self.category = category
+        self.priority = priority
+        self.department = department
+        self.search = search
+        self.limit = limit
+        self.cursor = cursor
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -35,13 +58,8 @@ async def create_new_issue(
     issue_service: Annotated[IssueService, Depends(get_issue_service)],
 ) -> dict[str, Any]:
     """Submit a citizen grievance, run automated AI triage, and return ticket confirmation."""
-    # Round coordinates to 3 decimals in log outputs to prevent PII exposure
     if payload.latitude and payload.longitude:
-        logger.info(
-            "Lodging report near lat: %.3f, lon: %.3f",
-            payload.latitude,
-            payload.longitude,
-        )
+        logger.info("Lodging report near lat: %.3f, lon: %.3f", payload.latitude, payload.longitude)
 
     issue, duplicates = await issue_service.create_issue(
         description=payload.description,
@@ -72,25 +90,18 @@ async def create_new_issue(
 @router.get("/issues")
 async def list_public_issues(
     issue_service: Annotated[IssueService, Depends(get_issue_service)],
-    status: str | None = Query(default=None),
-    category: str | None = Query(default=None),
-    priority: str | None = Query(default=None),
-    department: str | None = Query(default=None),
-    search: str | None = Query(default=None),
-    limit: int = Query(default=20, ge=1, le=100),
-    cursor: str | None = Query(default=None),
+    filters: Annotated[IssueFilterParams, Depends()],
 ) -> dict[str, Any]:
     """Retrieve filtered, paginated list of civic grievances."""
     items, next_cursor = await issue_service.list_issues(
-        status=status,
-        category=category,
-        priority=priority,
-        department=department,
-        search=search,
-        limit=limit,
-        cursor=cursor,
+        status=filters.status,
+        category=filters.category,
+        priority=filters.priority,
+        department=filters.department,
+        search=filters.search,
+        limit=filters.limit,
+        cursor=filters.cursor,
     )
-    # Slim DTO serialization (exclude large image data)
     return {
         "items": [it.to_dict() for it in items],
         "next_cursor": next_cursor,
@@ -118,10 +129,10 @@ async def get_issue_by_ticket_id(
 
 @router.get("/stats")
 async def get_aggregated_stats(
-    issue_service: Annotated[IssueService, Depends(get_issue_service)],
+    stats_service: Annotated[StatsService, Depends(get_stats_service)],
 ) -> dict[str, Any]:
     """Retrieve public transparency metrics and SVG chart data points."""
-    return await issue_service.get_public_stats()
+    return await stats_service.get_public_stats()
 
 
 @router.post("/assist")

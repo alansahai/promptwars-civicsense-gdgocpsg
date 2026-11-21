@@ -12,6 +12,45 @@ from app.repositories.base import IssueRepository
 from app.repositories.seed import generate_seed_issues
 
 
+def _matches_filter(
+    it: Issue,
+    status: str | None,
+    category: str | None,
+    priority: str | None,
+    department: str | None,
+    search_term: str | None,
+) -> bool:
+    """Evaluate whether an Issue matches the given criteria."""
+    if status and it.status.lower() != status.lower():
+        return False
+    if category and it.category.lower() != category.lower():
+        return False
+    if priority and it.priority_level.lower() != priority.lower():
+        return False
+    if department and it.department.lower() != department.lower():
+        return False
+    if search_term:
+        searchable = f"{it.ticket_id} {it.title} {it.description} {it.address or ''}".lower()
+        if search_term not in searchable:
+            return False
+    return True
+
+
+def _paginate_items(items: list[Issue], limit: int, cursor: str | None) -> tuple[list[Issue], str | None]:
+    """Slice items based on cursor ticket_id and limit."""
+    start_idx = 0
+    if cursor:
+        for idx, it in enumerate(items):
+            if it.ticket_id == cursor:
+                start_idx = idx + 1
+                break
+
+    page = items[start_idx : start_idx + limit]
+    has_more = len(page) == limit and (start_idx + limit) < len(items)
+    next_cursor = page[-1].ticket_id if has_more else None
+    return page, next_cursor
+
+
 class InMemoryRepository(IssueRepository):
     """In-memory issue repository implementation."""
 
@@ -19,7 +58,6 @@ class InMemoryRepository(IssueRepository):
         self._lock = asyncio.Lock()
         self._issues: dict[str, Issue] = {}
         self._photos: dict[str, str] = {}
-        # Pre-seed issues
         seeds = generate_seed_issues(city_name)
         for issue in seeds:
             self._issues[issue.ticket_id] = issue
@@ -48,38 +86,13 @@ class InMemoryRepository(IssueRepository):
         async with self._lock:
             items = list(self._issues.values())
 
-        # Sort by priority_score descending, then created_at descending
         items.sort(key=lambda x: (x.priority_score, x.created_at), reverse=True)
-
-        filtered: list[Issue] = []
         search_term = search.lower().strip() if search else None
-
-        for it in items:
-            if status and it.status.lower() != status.lower():
-                continue
-            if category and it.category.lower() != category.lower():
-                continue
-            if priority and it.priority_level.lower() != priority.lower():
-                continue
-            if department and it.department.lower() != department.lower():
-                continue
-            if search_term:
-                searchable = f"{it.ticket_id} {it.title} {it.description} {it.address or ''}".lower()
-                if search_term not in searchable:
-                    continue
-            filtered.append(it)
-
-        # Pagination using cursor as ticket_id
-        start_idx = 0
-        if cursor:
-            for idx, it in enumerate(filtered):
-                if it.ticket_id == cursor:
-                    start_idx = idx + 1
-                    break
-
-        page = filtered[start_idx : start_idx + limit]
-        next_cursor = page[-1].ticket_id if len(page) == limit and (start_idx + limit) < len(filtered) else None
-        return page, next_cursor
+        filtered = [
+            it for it in items
+            if _matches_filter(it, status, category, priority, department, search_term)
+        ]
+        return _paginate_items(filtered, limit, cursor)
 
     async def update_issue(self, issue: Issue) -> None:
         """Update existing issue in memory."""
@@ -90,8 +103,9 @@ class InMemoryRepository(IssueRepository):
         """Store compressed photo lazily."""
         async with self._lock:
             self._photos[ticket_id] = photo_data_url
-            if ticket_id in self._issues:
-                self._issues[ticket_id].has_photo = True
+            issue = self._issues.get(ticket_id)
+            if issue:
+                issue.has_photo = True
 
     async def get_photo(self, ticket_id: str) -> str | None:
         """Retrieve stored photo data URL."""
@@ -99,6 +113,6 @@ class InMemoryRepository(IssueRepository):
             return self._photos.get(ticket_id)
 
     async def get_all_raw(self) -> list[dict[str, Any]]:
-        """Return all issues as dictionaries."""
+        """Return raw dictionary representations for aggregation queries."""
         async with self._lock:
             return [it.to_dict() for it in self._issues.values()]

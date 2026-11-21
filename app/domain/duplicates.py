@@ -49,8 +49,7 @@ def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float
 def tokenize_text(text: str) -> set[str]:
     """Tokenize and normalize text removing punctuation and stop words."""
     cleaned = re.sub(r"[^\w\s]", " ", text.lower())
-    tokens = {word for word in cleaned.split() if len(word) > 2 and word not in STOP_WORDS}
-    return tokens
+    return {word for word in cleaned.split() if len(word) > 2 and word not in STOP_WORDS}
 
 
 def text_jaccard_similarity(text1: str, text2: str) -> float:
@@ -64,6 +63,60 @@ def text_jaccard_similarity(text1: str, text2: str) -> float:
     return float(intersection) / float(union) if union > 0 else 0.0
 
 
+def _is_duplicate_match(
+    coords_match: bool,
+    same_category: bool,
+    similarity: float,
+    min_similarity: float,
+) -> bool:
+    """Evaluate duplicate conditions across spatial proximity and text similarity."""
+    return (
+        (coords_match and same_category and similarity >= 0.20)
+        or (coords_match and similarity >= 0.45)
+        or (same_category and similarity >= min_similarity)
+    )
+
+
+def _evaluate_single_duplicate(
+    candidate_lat: float | None,
+    candidate_lon: float | None,
+    candidate_text: str,
+    candidate_category: str,
+    issue: dict[str, Any],
+    max_distance_meters: float,
+    min_similarity: float,
+) -> DuplicateMatch | None:
+    """Evaluate candidate against one existing issue record."""
+    if issue.get("status") in {"Resolved", "Rejected"}:
+        return None
+
+    same_category = issue.get("category") == candidate_category
+    other_lat = issue.get("latitude")
+    other_lon = issue.get("longitude")
+
+    distance = 0.0
+    coords_match = False
+    if candidate_lat is not None and candidate_lon is not None and other_lat is not None and other_lon is not None:
+        distance = haversine_distance_meters(
+            candidate_lat, candidate_lon, float(other_lat), float(other_lon)
+        )
+        coords_match = distance <= max_distance_meters
+
+    other_text = f"{issue.get('title', '')} {issue.get('description', '')}"
+    sim = text_jaccard_similarity(candidate_text, other_text)
+
+    if _is_duplicate_match(coords_match, same_category, sim, min_similarity):
+        return DuplicateMatch(
+            ticket_id=issue.get("ticket_id", ""),
+            category=issue.get("category", ""),
+            distance_meters=round(distance, 1),
+            text_similarity=round(sim, 2),
+            status=issue.get("status", "Reported"),
+            title=issue.get("title", ""),
+        )
+    return None
+
+
 def find_duplicates(
     candidate_lat: float | None,
     candidate_lon: float | None,
@@ -75,54 +128,16 @@ def find_duplicates(
 ) -> list[DuplicateMatch]:
     """Identify duplicate issues based on proximity and textual similarity."""
     matches: list[DuplicateMatch] = []
-
     for issue in existing_issues:
-        # Only check open or recently reported issues
-        if issue.get("status") in {"Resolved", "Rejected"}:
-            continue
-
-        same_category = issue.get("category") == candidate_category
-        other_lat = issue.get("latitude")
-        other_lon = issue.get("longitude")
-
-        distance = 0.0
-        coords_match = False
-        if (
-            candidate_lat is not None
-            and candidate_lon is not None
-            and other_lat is not None
-            and other_lon is not None
-        ):
-            distance = haversine_distance_meters(
-                candidate_lat, candidate_lon, float(other_lat), float(other_lon)
-            )
-            coords_match = distance <= max_distance_meters
-
-        sim = text_jaccard_similarity(
+        match = _evaluate_single_duplicate(
+            candidate_lat,
+            candidate_lon,
             candidate_text,
-            f"{issue.get('title', '')} {issue.get('description', '')}",
+            candidate_category,
+            issue,
+            max_distance_meters,
+            min_similarity,
         )
-
-        # Flag as duplicate if:
-        # 1. Close coordinates + same category + moderate text similarity
-        # 2. Close coordinates + high text similarity
-        # 3. Very high text similarity in same category even without coordinates
-        is_dup = (
-            (coords_match and same_category and sim >= 0.20)
-            or (coords_match and sim >= 0.45)
-            or (same_category and sim >= min_similarity)
-        )
-
-        if is_dup:
-            matches.append(
-                DuplicateMatch(
-                    ticket_id=issue.get("ticket_id", ""),
-                    category=issue.get("category", ""),
-                    distance_meters=round(distance, 1),
-                    text_similarity=round(sim, 2),
-                    status=issue.get("status", "Reported"),
-                    title=issue.get("title", ""),
-                )
-            )
-
+        if match is not None:
+            matches.append(match)
     return sorted(matches, key=lambda m: (m.distance_meters, -m.text_similarity))

@@ -46,10 +46,9 @@ def build_safe_prompt_envelope(user_description: str, address: str | None = None
     sanitized_desc = sanitize_user_text(user_description)
     sanitized_addr = sanitize_user_text(address or "Not provided", max_length=200)
 
-    envelope = (
+    return (
         "<report>\n"
         f"  <citizen_description>{sanitized_desc}</citizen_description>\n"
         f"  <reported_location>{sanitized_addr}</reported_location>\n"
         "</report>"
     )
-    return envelope

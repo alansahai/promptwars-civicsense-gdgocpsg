@@ -1,25 +1,134 @@
 """High-level civic issue management service.
 
-Implements all primary application use-cases: issue creation, retrieval,
-lifecycle management, administrative overrides, and statistical aggregations.
+Implements core grievance management use-cases: issue creation, retrieval,
+lifecycle transitions, administrative overrides, and re-analysis.
 """
 
-import random
-from datetime import UTC, datetime, timedelta
+import secrets
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
-from app.config import get_settings
-from app.domain.lifecycle import can_transition, is_sla_breached
+from app.domain.errors import InvalidTransitionError, NotFoundError
+from app.domain.lifecycle import can_transition
 from app.domain.models import Issue, StatusHistoryItem
 from app.repositories.base import IssueRepository
+from app.services.analytics_service import AnalyticsService
+from app.services.stats_service import StatsService
 from app.services.triage import run_triage_pipeline
+
+
+@dataclass(frozen=True)
+class IssueDraft:
+    """Parameters for constructing an initial citizen Issue record."""
+
+    ticket_id: str
+    title: str | None
+    description: str
+    address: str | None
+    latitude: float | None
+    longitude: float | None
+    citizen_name: str | None
+    has_photo: bool
 
 
 def _generate_ticket_id() -> str:
     """Generate sequential-style ticket identifier e.g. CR-2026-00042."""
     year = datetime.now(UTC).year
-    rand_num = random.randint(1000, 99999)
+    rand_num = secrets.randbelow(90000) + 10000
     return f"CR-{year}-{rand_num:05d}"
+
+
+def _build_created_issue(draft: IssueDraft, triage: Any, now: datetime) -> Issue:
+    """Assemble a new Issue domain model from draft and triage results."""
+    final_title = draft.title.strip() if (draft.title and len(draft.title.strip()) > 5) else triage.analysis.suggested_title
+    initial_history = [
+        StatusHistoryItem(
+            status="Reported",
+            timestamp=now,
+            author="Citizen",
+            note="Grievance lodged via online portal",
+        )
+    ]
+    return Issue(
+        ticket_id=draft.ticket_id,
+        title=final_title,
+        description=draft.description,
+        category=triage.final_category,
+        department=triage.final_department,
+        priority_level=triage.priority.level,
+        priority_score=triage.priority.score,
+        sla_hours=triage.priority.sla_hours,
+        status="Reported",
+        created_at=now,
+        updated_at=now,
+        address=draft.address,
+        latitude=draft.latitude,
+        longitude=draft.longitude,
+        citizen_name=draft.citizen_name,
+        has_photo=draft.has_photo,
+        ai_analysis=triage.analysis,
+        priority_breakdown=triage.priority.breakdown,
+        status_history=initial_history,
+        duplicate_of=triage.duplicates[0].ticket_id if triage.duplicates else None,
+        admin_override=False,
+        admin_notes=None,
+    )
+
+
+def _apply_overrides(
+    issue: Issue,
+    cat_override: str | None,
+    pri_override: str | None,
+    dept_override: str | None,
+    dup_override: str | None,
+) -> bool:
+    """Apply administrative field overrides, returning True if any were applied."""
+    is_override = False
+    if cat_override and cat_override != issue.category:
+        issue.category = cat_override
+        is_override = True
+    if pri_override and pri_override != issue.priority_level:
+        issue.priority_level = pri_override
+        is_override = True
+    if dept_override and dept_override != issue.department:
+        issue.department = dept_override
+        is_override = True
+    if dup_override:
+        issue.duplicate_of = dup_override
+
+    if is_override:
+        issue.admin_override = True
+    return is_override
+
+
+def _record_status_transition(
+    issue: Issue,
+    new_status: str,
+    author: str,
+    note: str,
+    is_override: bool,
+    now: datetime,
+) -> None:
+    """Update issue status fields and append a new StatusHistoryItem."""
+    issue.status = new_status
+    issue.updated_at = now
+    if new_status == "Resolved":
+        issue.resolved_at = now
+
+    history_note = note or f"Status shifted to {new_status}"
+    if is_override:
+        history_note += " (Admin override applied)"
+
+    issue.status_history.append(
+        StatusHistoryItem(
+            status=new_status,
+            timestamp=now,
+            author=author,
+            note=history_note,
+            is_public=True,
+        )
+    )
 
 
 class IssueService:
@@ -27,6 +136,8 @@ class IssueService:
 
     def __init__(self, repository: IssueRepository) -> None:
         self.repo = repository
+        self._stats_service = StatsService(repository)
+        self._analytics_service = AnalyticsService(repository)
 
     async def create_issue(
         self,
@@ -34,67 +145,23 @@ class IssueService:
         title: str | None = None,
         address: str | None = None,
         category: str | None = None,
-        latitude: float | None = None,
-        longitude: float | None = None,
+        coords: tuple[float | None, float | None] = (None, None),
         citizen_name: str | None = None,
         photo_data_url: str | None = None,
+        **kwargs: Any,
     ) -> tuple[Issue, list[Any]]:
         """Create and persist a new civic issue with automated triage."""
+        lat = kwargs.get("latitude", coords[0])
+        lon = kwargs.get("longitude", coords[1])
         existing_raw = await self.repo.get_all_raw()
-
-        # Execute automated triage pipeline
         triage = await run_triage_pipeline(
-            description=description,
-            title=title,
-            address=address,
-            user_category=category,
-            latitude=latitude,
-            longitude=longitude,
-            photo_data_url=photo_data_url,
-            existing_issues=existing_raw,
+            description, title, address, category, (lat, lon), photo_data_url, existing_raw
         )
-
         ticket_id = _generate_ticket_id()
-        now = datetime.now(UTC)
-
-        final_title = title.strip() if (title and len(title.strip()) > 5) else triage.analysis.suggested_title
-
-        initial_history = [
-            StatusHistoryItem(
-                status="Reported",
-                timestamp=now,
-                author="Citizen",
-                note="Grievance lodged via online portal",
-            )
-        ]
-
-        issue = Issue(
-            ticket_id=ticket_id,
-            title=final_title,
-            description=description,
-            category=triage.final_category,
-            department=triage.final_department,
-            priority_level=triage.priority.level,
-            priority_score=triage.priority.score,
-            sla_hours=triage.priority.sla_hours,
-            status="Reported",
-            created_at=now,
-            updated_at=now,
-            address=address,
-            latitude=latitude,
-            longitude=longitude,
-            citizen_name=citizen_name,
-            has_photo=bool(photo_data_url),
-            ai_analysis=triage.analysis,
-            priority_breakdown=triage.priority.breakdown,
-            status_history=initial_history,
-            duplicate_of=triage.duplicates[0].ticket_id if triage.duplicates else None,
-            admin_override=False,
-            admin_notes=None,
-        )
+        draft = IssueDraft(ticket_id, title, description, address, lat, lon, citizen_name, bool(photo_data_url))
+        issue = _build_created_issue(draft, triage, datetime.now(UTC))
 
         await self.repo.save_issue(issue)
-
         if photo_data_url:
             await self.repo.save_photo(ticket_id, photo_data_url)
 
@@ -135,57 +202,26 @@ class IssueService:
         new_status: str,
         author: str = "Admin Officer",
         note: str = "",
-        category_override: str | None = None,
-        priority_override: str | None = None,
-        department_override: str | None = None,
+        overrides: tuple[str | None, str | None, str | None] = (None, None, None),
         duplicate_of: str | None = None,
+        **kwargs: Any,
     ) -> Issue:
         """Update ticket status, apply administrative overrides, and update history."""
         issue = await self.repo.get_issue_by_id(ticket_id)
         if not issue:
-            raise KeyError(f"Ticket {ticket_id} not found")
+            raise NotFoundError(f"Ticket {ticket_id} not found")
 
         if not can_transition(issue.status, new_status):
-            raise ValueError(f"Transition from {issue.status} to {new_status} is not permitted")
+            raise InvalidTransitionError(f"Transition from {issue.status} to {new_status} is not permitted")
+
+        cat_override = kwargs.get("category_override", overrides[0])
+        pri_override = kwargs.get("priority_override", overrides[1])
+        dept_override = kwargs.get("department_override", overrides[2])
+        dup_override = kwargs.get("duplicate_of", duplicate_of)
 
         now = datetime.now(UTC)
-        is_override = False
-
-        if category_override and category_override != issue.category:
-            issue.category = category_override
-            is_override = True
-        if priority_override and priority_override != issue.priority_level:
-            issue.priority_level = priority_override
-            is_override = True
-        if department_override and department_override != issue.department:
-            issue.department = department_override
-            is_override = True
-
-        if is_override:
-            issue.admin_override = True
-
-        if duplicate_of:
-            issue.duplicate_of = duplicate_of
-
-        issue.status = new_status
-        issue.updated_at = now
-
-        if new_status == "Resolved":
-            issue.resolved_at = now
-
-        history_note = note or f"Status shifted to {new_status}"
-        if is_override:
-            history_note += " (Admin override applied)"
-
-        issue.status_history.append(
-            StatusHistoryItem(
-                status=new_status,
-                timestamp=now,
-                author=author,
-                note=history_note,
-                is_public=True,
-            )
-        )
+        is_override = _apply_overrides(issue, cat_override, pri_override, dept_override, dup_override)
+        _record_status_transition(issue, new_status, author, note, is_override, now)
 
         await self.repo.update_issue(issue)
         return issue
@@ -194,7 +230,7 @@ class IssueService:
         """Trigger re-analysis of an existing ticket."""
         issue = await self.repo.get_issue_by_id(ticket_id)
         if not issue:
-            raise KeyError(f"Ticket {ticket_id} not found")
+            raise NotFoundError(f"Ticket {ticket_id} not found")
 
         photo_url = await self.repo.get_photo(ticket_id)
         existing_raw = await self.repo.get_all_raw()
@@ -204,8 +240,7 @@ class IssueService:
             title=issue.title,
             address=issue.address,
             user_category=issue.category,
-            latitude=issue.latitude,
-            longitude=issue.longitude,
+            coords=(issue.latitude, issue.longitude),
             photo_data_url=photo_url,
             existing_issues=existing_raw,
         )
@@ -216,7 +251,6 @@ class IssueService:
         issue.sla_hours = triage.priority.sla_hours
         issue.priority_breakdown = triage.priority.breakdown
         issue.updated_at = datetime.now(UTC)
-
         issue.status_history.append(
             StatusHistoryItem(
                 status=issue.status,
@@ -226,118 +260,13 @@ class IssueService:
                 is_public=False,
             )
         )
-
         await self.repo.update_issue(issue)
         return issue
 
     async def get_public_stats(self) -> dict[str, Any]:
-        """Compute aggregated public statistics and dashboard metrics."""
-        raw_list = await self.repo.get_all_raw()
-        total = len(raw_list)
-        resolved = sum(1 for i in raw_list if i.get("status") == "Resolved")
-        open_issues = sum(1 for i in raw_list if i.get("status") in {"Reported", "In Progress"})
-        rate = round((resolved / total * 100), 1) if total > 0 else 0.0
-
-        # Average resolution time
-        durations = []
-        for i in raw_list:
-            if i.get("status") == "Resolved" and i.get("resolved_at") and i.get("created_at"):
-                c = datetime.fromisoformat(i["created_at"])
-                r = datetime.fromisoformat(i["resolved_at"])
-                durations.append((r - c).total_seconds() / 3600.0)
-        avg_res = round(sum(durations) / len(durations), 1) if durations else 24.0
-
-        # Category breakdown
-        category_counts: dict[str, int] = {}
-        for i in raw_list:
-            cat = i.get("category", "Other")
-            category_counts[cat] = category_counts.get(cat, 0) + 1
-
-        # 14-day trend
-        today = datetime.now(UTC).date()
-        trend_days = [(today - timedelta(days=d)).isoformat() for d in range(13, -1, -1)]
-        trend_counts = dict.fromkeys(trend_days, 0)
-        for i in raw_list:
-            created_str = i.get("created_at", "")[:10]
-            if created_str in trend_counts:
-                trend_counts[created_str] += 1
-
-        # Locality coordinates for scatter map
-        map_points = []
-        for i in raw_list:
-            if i.get("latitude") and i.get("longitude"):
-                map_points.append(
-                    {
-                        "ticket_id": i["ticket_id"],
-                        "lat": i["latitude"],
-                        "lon": i["longitude"],
-                        "category": i["category"],
-                        "priority": i["priority_level"],
-                        "status": i["status"],
-                        "title": i["title"],
-                    }
-                )
-
-        settings = get_settings()
-        return {
-            "city_name": settings.city_name,
-            "total_issues": total,
-            "open_issues": open_issues,
-            "resolved_issues": resolved,
-            "resolution_rate_percent": rate,
-            "average_resolution_hours": avg_res,
-            "category_breakdown": category_counts,
-            "trend_14_days": [{"date": d, "count": trend_counts[d]} for d in trend_days],
-            "map_points": map_points,
-            "storage_mode": "memory" if settings.is_in_memory_storage else "upstash",
-        }
+        """Delegate public statistics calculation to StatsService."""
+        return await self._stats_service.get_public_stats()
 
     async def get_admin_analytics(self) -> dict[str, Any]:
-        """Compute advanced operational analytics for administrative monitoring."""
-        raw_list = await self.repo.get_all_raw()
-        dept_workload: dict[str, dict[str, int]] = {}
-        overdue_tickets: list[dict[str, Any]] = []
-        overrides_count = 0
-
-        for i in raw_list:
-            dept = i.get("department", "General Grievance")
-            if dept not in dept_workload:
-                dept_workload[dept] = {"total": 0, "open": 0, "resolved": 0}
-            dept_workload[dept]["total"] += 1
-            if i.get("status") in {"Reported", "In Progress"}:
-                dept_workload[dept]["open"] += 1
-            elif i.get("status") == "Resolved":
-                dept_workload[dept]["resolved"] += 1
-
-            if i.get("admin_override"):
-                overrides_count += 1
-
-            # Check SLA breach
-            created = datetime.fromisoformat(i["created_at"])
-            sla = i.get("sla_hours", 48)
-            resolved = datetime.fromisoformat(i["resolved_at"]) if i.get("resolved_at") else None
-            breached = is_sla_breached(created, sla, i.get("status", "Reported"), resolved)
-            if breached:
-                overdue_tickets.append(
-                    {
-                        "ticket_id": i["ticket_id"],
-                        "title": i["title"],
-                        "department": i["department"],
-                        "priority": i["priority_level"],
-                        "status": i["status"],
-                        "sla_hours": sla,
-                        "created_at": i["created_at"],
-                    }
-                )
-
-        total = len(raw_list)
-        override_rate = round(overrides_count / total * 100, 1) if total > 0 else 0.0
-
-        return {
-            "department_workload": dept_workload,
-            "overdue_count": len(overdue_tickets),
-            "overdue_tickets": overdue_tickets,
-            "admin_override_count": overrides_count,
-            "admin_override_rate_percent": override_rate,
-            "total_issues": total,
-        }
+        """Delegate administrative analytics calculation to AnalyticsService."""
+        return await self._analytics_service.get_admin_analytics()
