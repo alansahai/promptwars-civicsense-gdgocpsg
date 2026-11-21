@@ -47,12 +47,22 @@ def _process_photo(photo_data_url: str | None) -> tuple[bytes | None, str | None
     return (raw_bytes, detected_mime) if is_valid else (None, None)
 
 
+def _match_category(raw_category: str) -> IssueCategory:
+    """Normalize raw category string to standard IssueCategory."""
+    try:
+        return IssueCategory(raw_category)
+    except ValueError:
+        pass
+    raw_lower = raw_category.lower()
+    for cat in IssueCategory:
+        if cat != IssueCategory.OTHER and (cat.value.lower() in raw_lower or raw_lower in cat.value.lower()):
+            return cat
+    return IssueCategory.OTHER
+
+
 def _resolve_routing(analysis: AIAnalysis) -> tuple[str, str]:
     """Resolve validated municipal category and responsible department."""
-    try:
-        cat_enum = IssueCategory(analysis.category)
-    except ValueError:
-        cat_enum = IssueCategory.OTHER
+    cat_enum = _match_category(analysis.category)
 
     if is_valid_department_for_category(cat_enum.value, analysis.recommended_department):
         dept = analysis.recommended_department
