@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="CivicResolve - AI-Powered Citizen Grievance Management and Resolution Platform" />
+  <title>CivicResolve - Municipal Grievance Resolution</title>
+  <link rel="stylesheet" href="styles.css" />
+  <!-- Inline SVG favicon -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏛️</text></svg>" />
+</head>
+<body>
+  <!-- Accessible skip link for keyboard navigation -->
+  <a href="#main-content" class="skip-link" data-i18n="skip_link">Skip to main content</a>
+
+  <!-- Top Announcement & Demo Banner -->
+  <div id="banner-container"></div>
+
+  <!-- Primary Application Header -->
+  <header class="app-header" role="banner">
+    <div class="header-container">
+      <div class="brand">
+        <a href="#/report" class="brand-link" aria-label="CivicResolve Home">
+          <span class="brand-icon" aria-hidden="true">🏛️</span>
+          <span class="brand-name" data-i18n="app_title">CivicResolve</span>
+        </a>
+        <span class="brand-tagline" data-i18n="tagline">AI-Powered Grievance Resolution</span>
+      </div>
+
+      <nav class="app-nav" aria-label="Main Navigation">
+        <ul class="nav-list">
+          <li><a href="#/report" class="nav-link" data-i18n="nav_report">Report Issue</a></li>
+          <li><a href="#/track" class="nav-link" data-i18n="nav_track">Track Issue</a></li>
+          <li><a href="#/dashboard" class="nav-link" data-i18n="nav_dashboard">Public Dashboard</a></li>
+          <li><a href="#/admin" class="nav-link nav-link-admin" data-i18n="nav_admin">Officer Portal</a></li>
+        </ul>
+      </nav>
+
+      <div class="header-controls">
+        <!-- Language Switcher -->
+        <label for="lang-select" class="sr-only">Choose Language</label>
+        <select id="lang-select" class="lang-select" aria-label="Language selector">
+          <option value="en">English</option>
+          <option value="ta">தமிழ்</option>
+          <option value="hi">हिन्दी</option>
+        </select>
+
+        <!-- Accessibility Toggles -->
+        <button type="button" id="btn-contrast" class="btn btn-icon btn-sm" aria-label="Toggle High Contrast" data-i18n="btn_high_contrast" title="High Contrast Mode">
+          👁️
+        </button>
+        <button type="button" id="btn-font" class="btn btn-icon btn-sm" aria-label="Toggle Font Size" data-i18n="btn_font_size" title="Large Text Mode">
+          A+
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Landmark for Active View -->
+  <main id="main-content" class="main-content" role="main" tabindex="-1">
+    <div class="loading-spinner">Initializing CivicResolve...</div>
+  </main>
+
+  <!-- Footer Landmark -->
+  <footer class="app-footer" role="contentinfo">
+    <div class="footer-container">
+      <p class="copyright">
+        <strong>CivicResolve</strong> &copy; 2026 Municipal Grievance &amp; Resolution System.
+      </p>
+      <p class="footer-note">
+        Powered by Google Gemini 2.5 Flash Multimodal AI &bull; Built for Citizen Empowerment &bull; WCAG 2.1 AA Compliant
+      </p>
+    </div>
+  </footer>
+
+  <!-- Application Entry Script (Vanilla ES Module) -->
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
