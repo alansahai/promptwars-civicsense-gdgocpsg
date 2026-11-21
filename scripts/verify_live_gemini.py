@@ -1,6 +1,7 @@
 """Verification script for live Gemini API integration against local CivicResolve server."""
 
 import base64
+from datetime import datetime
 import io
 import json
 from typing import Any
@@ -147,12 +148,18 @@ def main() -> None:
     summary_e = res_e.json()
     print("Summary Response:")
     print(json.dumps(summary_e, indent=2))
-    summary_text = summary_e.get("summary") or summary_e.get("summary_text") or ""
+    summary_text = summary_e.get("summary") or ""
     assert summary_text, "summary text must not be empty"
-    paragraphs = [p for p in summary_text.split("\n") if p.strip()]
-    print(f"Paragraph/line count: {len(paragraphs)}")
-    assert len(paragraphs) >= 1, f"Expected non-empty summary lines, got {len(paragraphs)}"
-    print("PASS: 2e verified with grounded executive summary.")
+    # Verify ISO-8601 UTC timestamp format
+    gen_at = summary_e.get("generated_at", "")
+    dt = datetime.fromisoformat(gen_at)
+    assert dt.tzinfo is not None, f"Expected timezone in ISO timestamp, got {gen_at}"
+    assert summary_e.get("ai_generated") is True, f"Expected ai_generated == True, got {summary_e.get('ai_generated')}"
+    assert summary_e.get("analysis_source") == "gemini", f"Expected analysis_source == 'gemini', got {summary_e.get('analysis_source')}"
+    paragraphs = [p for p in summary_text.split("\n\n") if p.strip()]
+    print(f"Paragraph count: {len(paragraphs)}")
+    assert len(paragraphs) >= 2, f"Expected grounded multi-paragraph summary, got {len(paragraphs)}"
+    print("PASS: 2e verified with grounded Gemini executive summary, ISO timestamp, and AI source metadata.")
 
     # 2f. POST /api/issues with prompt injection
     print("\n[CHECK 2f] POST /api/issues with prompt injection ...")
