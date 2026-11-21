@@ -128,9 +128,7 @@ async function fetchAndRenderIssue(ticketId, container, errorBox) {
   }
 }
 
-export function renderTrackView(container, queryParams) {
-  clear(container);
-
+function _buildSearchForm(onSearch) {
   const idInput = h("input", {
     type: "text",
     id: "track-id-input",
@@ -138,18 +136,16 @@ export function renderTrackView(container, queryParams) {
     placeholder: "e.g. CR-2026-00001",
     required: true,
   });
-  const errorBox = h("div", { id: "track-error", class: "alert alert-error hidden", role: "alert" });
-  const resultArea = h("div", { id: "track-result-area" });
 
   const form = h(
     "form",
     {
       id: "track-form",
       class: "track-form",
-      onSubmit: async (e) => {
+      onSubmit: (e) => {
         e.preventDefault();
         const id = idInput.value.trim();
-        if (id) await fetchAndRenderIssue(id, resultArea, errorBox);
+        if (id) onSearch(id);
       },
     },
     h(
@@ -159,6 +155,19 @@ export function renderTrackView(container, queryParams) {
       h("div", { class: "input-with-button" }, idInput, h("button", { type: "submit", class: "btn btn-primary" }, t("btn_track")))
     )
   );
+
+  return { form, idInput };
+}
+
+export function renderTrackView(container, queryParams) {
+  clear(container);
+
+  const errorBox = h("div", { id: "track-error", class: "alert alert-error hidden", role: "alert" });
+  const resultArea = h("div", { id: "track-result-area" });
+
+  const { form, idInput } = _buildSearchForm((id) => {
+    fetchAndRenderIssue(id, resultArea, errorBox);
+  });
 
   const section = h(
     "section",

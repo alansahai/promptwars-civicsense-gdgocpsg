@@ -188,7 +188,7 @@ function _buildTitleField() {
   );
 }
 
-function _buildCategoryLocationGrid() {
+function _buildCategorySelect() {
   const categories = [
     ["Let AI decide", t("lbl_category_ai")],
     ["Pothole", "Pothole"],
@@ -202,43 +202,45 @@ function _buildCategoryLocationGrid() {
     ["Noise Complaint", "Noise Complaint"],
     ["Other", "Other"],
   ];
-
   return h(
     "div",
-    { className: "form-grid" },
+    { className: "form-group" },
+    h("label", { for: "rep-category" }, t("lbl_category")),
     h(
-      "div",
-      { className: "form-group" },
-      h("label", { for: "rep-category" }, t("lbl_category")),
-      h(
-        "select",
-        { id: "rep-category", className: "form-control" },
-        ...categories.map(([val, label]) => h("option", { value: val }, label))
-      )
-    ),
-    h(
-      "div",
-      { className: "form-group" },
-      h("label", { for: "rep-location" }, t("lbl_location")),
-      h(
-        "div",
-        { className: "input-with-button" },
-        h("input", {
-          type: "text",
-          id: "rep-location",
-          className: "form-control",
-          placeholder: t("lbl_location_placeholder"),
-        }),
-        h("button", {
-          type: "button",
-          id: "btn-geo",
-          className: "btn btn-secondary btn-sm",
-          title: "Use current GPS",
-        }, "📍 GPS")
-      ),
-      h("small", { id: "geo-status", className: "form-help" })
+      "select",
+      { id: "rep-category", className: "form-control" },
+      ...categories.map(([val, label]) => h("option", { value: val }, label))
     )
   );
+}
+
+function _buildLocationInput() {
+  return h(
+    "div",
+    { className: "form-group" },
+    h("label", { for: "rep-location" }, t("lbl_location")),
+    h(
+      "div",
+      { className: "input-with-button" },
+      h("input", {
+        type: "text",
+        id: "rep-location",
+        className: "form-control",
+        placeholder: t("lbl_location_placeholder"),
+      }),
+      h("button", {
+        type: "button",
+        id: "btn-geo",
+        className: "btn btn-secondary btn-sm",
+        title: "Use current GPS",
+      }, "📍 GPS")
+    ),
+    h("small", { id: "geo-status", className: "form-help" })
+  );
+}
+
+function _buildCategoryLocationGrid() {
+  return h("div", { className: "form-grid" }, _buildCategorySelect(), _buildLocationInput());
 }
 
 function _buildPhotoNameGrid() {

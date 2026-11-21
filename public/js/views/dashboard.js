@@ -85,39 +85,28 @@ function _buildTableSection() {
   );
 }
 
+function _buildFilterSelects() {
+  const statuses = ["", "Reported", "In Progress", "Resolved", "Duplicate"];
+  const categories = ["", "Pothole", "Overflowing Garbage", "Damaged Streetlight", "Water Leakage", "Exposed Live Wire", "Sewage Overflow"];
+  const priorities = ["", "Critical", "High", "Medium", "Low"];
+
+  const buildSelect = (id, options, defaultLabel) =>
+    h("select", { id, className: "form-control form-control-sm" },
+      ...options.map((opt) => h("option", { value: opt }, opt || defaultLabel))
+    );
+
+  return [
+    buildSelect("filter-status", statuses, "All Statuses"),
+    buildSelect("filter-category", categories, "All Categories"),
+    buildSelect("filter-priority", priorities, "All Priorities"),
+  ];
+}
+
 function _buildFiltersRow() {
   return h(
     "div",
     { className: "filters-row" },
-    h(
-      "select",
-      { id: "filter-status", className: "form-control form-control-sm" },
-      h("option", { value: "" }, "All Statuses"),
-      h("option", { value: "Reported" }, "Reported"),
-      h("option", { value: "In Progress" }, "In Progress"),
-      h("option", { value: "Resolved" }, "Resolved"),
-      h("option", { value: "Duplicate" }, "Duplicate")
-    ),
-    h(
-      "select",
-      { id: "filter-category", className: "form-control form-control-sm" },
-      h("option", { value: "" }, "All Categories"),
-      h("option", { value: "Pothole" }, "Pothole"),
-      h("option", { value: "Overflowing Garbage" }, "Garbage"),
-      h("option", { value: "Damaged Streetlight" }, "Streetlight"),
-      h("option", { value: "Water Leakage" }, "Water Leakage"),
-      h("option", { value: "Exposed Live Wire" }, "Exposed Live Wire"),
-      h("option", { value: "Sewage Overflow" }, "Sewage Overflow")
-    ),
-    h(
-      "select",
-      { id: "filter-priority", className: "form-control form-control-sm" },
-      h("option", { value: "" }, "All Priorities"),
-      h("option", { value: "Critical" }, "Critical"),
-      h("option", { value: "High" }, "High"),
-      h("option", { value: "Medium" }, "Medium"),
-      h("option", { value: "Low" }, "Low")
-    ),
+    ..._buildFilterSelects(),
     h("input", {
       type: "text",
       id: "filter-search",
