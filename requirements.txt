@@ -1,0 +1,6 @@
+# Core lightweight dependencies for Vercel Serverless and runtime
+fastapi==0.115.5
+pydantic==2.10.3
+pydantic-settings==2.6.1
+httpx==0.28.1
+google-genai==1.14.0

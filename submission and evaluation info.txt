@@ -1,0 +1,223 @@
+Submission Instruction
+
+Submission Link Format
+Participants must submit their "Public GitHub Repository" on the platform.
+The GitHub repo size should be less than 10 MB
+Public Access is Mandatory 
+Restricted / Private Links Will Not Be Evaluated
+If the link is private/restricted, the submission cannot be evaluated.
+The video link should either be unlisted on YouTube or Drive Link with access given.
+Note: 
+
+For this round, you are only allowed to submit at most 3 times.
+
+
+Starting Date
+
+16/11/2026 04:00:00 PM(IST)
+Ending Date
+
+29/11/2026 11:59:00 PM(IST)
+
+Parameters
+
+
+Code Quality - High Impact :How clean, readable, and well-structured the submitted code is.
+
+Security : Medium Impact
+Whether the code follows safe practices and avoids common vulnerabilities.
+
+Efficiency : Medium Impact
+How well the code utilizes resources like time and memory.
+
+Testing : Low Impact
+How easily the code can be tested, validated, and maintained over time.
+
+Accessibility : Low Impact
+How usable the solution is for diverse users and environments.
+
+Problem Statement Alignment : High Impact
+This measures how accurately your submission targets the root challenge, user needs, and core objectives.
+
+
+Instructions
+1. Before You Begin
+Make sure the following prerequisites are completed:
+
+The AI platform that you are going to use is downloaded and set up on your system
+Git is installed and configured
+You have an active GitHub account
+You are able to create and manage public repositories
+2. Important Rules
+Maximum 3 attempts allowed.
+The repository size must be less than 10 MB
+The GitHub repository must be public
+The repository should contain only one branch
+Failure to follow these rules may result in your submission not being evaluated
+3. Challenge Expectations
+Your solution should demonstrate:
+
+Ability to build a smart, dynamic assistant
+Logical decision making based on user context
+Practical and real-world usability
+Clean and maintainable code
+Participants must choose one of the provided challenge verticals and design their solution around that persona and logic.
+
+4. How to Work on Your Project
+Create a new repository on GitHub
+Ensure the repository is set to public
+Open your AI platform
+Clone your repository inside the AI platform
+Build your solution through prompting and coding
+Regularly commit and push your progress
+Keep all work within a single branch
+5. What to Submit
+Note: For detail guide on how to submit. Please refer to the document
+Link
+
+Your submission must include:
+
+A public GitHub repository link
+Complete project code inside the repository
+A README explaining:
+Your chosen vertical
+Approach and logic
+How the solution works
+Any assumptions made
+6. Evaluation Focus Areas
+Submissions will be reviewed on:
+
+Code Quality – structure, readability, maintainability
+Security – safe and responsible implementation
+Efficiency – optimal use of resources
+Testing – validation of functionality
+Accessibility – inclusive and usable design
+Problem Statement Alignment – relevance to the stated problem
+7. How Your Work is Evaluated
+Our evaluation looks at different parts of your submission. Use these tags to guide your focus, as your score in each tier directly shapes your final result:
+
+High Impact: These are the most important parts of your project. Doing great here will heavily drive a high overall score, while missing these points will drastically lower your standing.
+Medium Impact: These parameters check how well your solution works under the surface. Doing great here will steadily elevate your score, while a miss will moderately lower your standing.
+Low Impact: These criteria look at the final layers of polish. Excelling here will only give a small boost to your score, but you still need them if you want to get a perfect score.
+
+
+
+
+
+
+
+
+Your Company
+Select Language
+▼
+Home
+
+Blogs
+
+My Dashboard
+
+
+Open user menu
+Alan S
+
+alansahai123@gmail.com
+
+Logout
+Go back
+
+[Submission] Challenge 6
+
+MODULE CLOSING IN
+
+09d15h47m
+Submission Attempts:
+0/3
+
+AI Code Submission
+
+Your code submission is evaluated by AI on the following criteria:
+
+My Current Rank:
+#152
+/
+54043
+
+Instructions
+Parameters
+
+
+Code Quality
+
+Security
+
+Efficiency
+
+Testing
+
+Accessibility
+
+Problem Statement Alignment
+Submission Instruction
+
+Submission Link Format
+Participants must submit their "Public GitHub Repository" on the platform.
+The GitHub repo size should be less than 10 MB
+Public Access is Mandatory 
+Restricted / Private Links Will Not Be Evaluated
+If the link is private/restricted, the submission cannot be evaluated.
+The video link should either be unlisted on YouTube or Drive Link with access given.
+Note: 
+
+For this round, you are only allowed to submit at most 3 times.
+
+
+Starting Date
+
+16/11/2026 04:00:00 PM(IST)
+Ending Date
+
+29/11/2026 11:59:00 PM(IST)
+Challenges
+
+--Select an Option--
+Public GitHub Repository Link
+*
+Enter Public GitHub Repository Link
+0/1024
+
+Project Deployed Link
+*
+Enter Project Deployed Link
+Project Demo Video Submission
+*
+Enter Project Demo Video Submission
+Describe the changes/updates made in the deployed version
+*
+Enter Describe the changes/updates made in the deployed version
+0/1024
+
+Mention the Gen AI services utilized in the submission, and where did you utilize it?
+*
+Enter Mention the Gen AI services utilized in the submission, and where did you utilize it?
+
+0/1024
+
+LinkedIn Post
+*
+Enter LinkedIn Post
+Note:
+URL must include https or http , example: https://linkedin.com/in/sample_user
+Submit
+No Results Yet
+
+Submit your git link for ai evaluation to get a score
+
+Attempt History
+
+No analysis attempts yet.
+Challenge 5 leaderboard updated. 
+Grievance Form rolled out. Deadline to fill it: 22 Nov.
+Usage of Gen AI is mandatory.
+Note: NO GCP CREDITS WILL BE PROVIDED. YOU CAN USE ANY AI TOOL TO BUILD & DEPLOY.
+The leaderboard is only for the main challenges & not mini challenges. For mini challenges, only those with valid submissions post evaluation will receive prompt credits & an email.
+The video submission is mandatory. Please make sure after every submission, you create a video & submit. Only the submission you are confident in - create a proper video for that. It should highlight all the aspects our project. You can refer to the video guide.
