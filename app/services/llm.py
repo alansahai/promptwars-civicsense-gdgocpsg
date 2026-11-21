@@ -63,7 +63,7 @@ def _get_gemini_client() -> genai.Client | None:
     try:
         return genai.Client(
             api_key=settings.gemini_api_key,
-            http_options=types.HttpOptions(timeout=8000),  # 8s request timeout
+            http_options=types.HttpOptions(timeout=12000),  # 12s request timeout (exceeds 10s API minimum)
         )
     except Exception as exc:
         # Catch unexpected initialization failures and log warning
