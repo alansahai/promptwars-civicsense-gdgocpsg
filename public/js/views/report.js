@@ -1,9 +1,13 @@
 /**
- * Citizen Grievance Submission View with Client-Side Image Resizing,
- * Geolocation, AI Assist, and Structured Confirmation Card.
+ * Citizen Grievance Submission View.
+ *
+ * Implements client-side image resizing, HTML5 geolocation,
+ * live AI description enhancement, and structured triage confirmation.
+ * Constructed strictly via safe DOM elements without innerHTML.
  */
 
 import { api } from "../api.js";
+import { clear, h } from "../dom.js";
 import { t } from "../i18n.js";
 import { router } from "../router.js";
 
@@ -50,36 +54,39 @@ const SAMPLES = {
   },
 };
 
+/**
+ * Render the main Citizen Grievance Reporting surface.
+ * @param {HTMLElement} container - Host container element.
+ */
 export function renderReportView(container) {
-  container.innerHTML = "";
+  clear(container);
 
-  const section = document.createElement("section");
-  section.className = "view-section report-view";
+  const section = h(
+    "section",
+    { className: "view-section report-view" },
+    h(
+      "div",
+      { className: "section-header" },
+      h("h1", { "data-i18n": "report_heading" }, t("report_heading")),
+      h("p", { className: "subtitle", "data-i18n": "report_sub" }, t("report_sub"))
+    ),
+    _buildSampleCards(),
+    _buildReportForm(),
+    h("div", { id: "confirmation-card-area" })
+  );
 
-  // Section Header
-  const header = document.createElement("div");
-  header.className = "section-header";
-  const h1 = document.createElement("h1");
-  h1.setAttribute("data-i18n", "report_heading");
-  h1.textContent = t("report_heading");
-  const p = document.createElement("p");
-  p.className = "subtitle";
-  p.setAttribute("data-i18n", "report_sub");
-  p.textContent = t("report_sub");
-  header.appendChild(h1);
-  header.appendChild(p);
-  section.appendChild(header);
+  container.appendChild(section);
 
-  // Quick Sample Buttons Container
-  const sampleCard = document.createElement("div");
-  sampleCard.className = "card sample-card";
-  const sampleTitle = document.createElement("p");
-  sampleTitle.className = "sample-title";
-  sampleTitle.innerHTML = `<strong>${t("sample_title")}</strong>`;
-  sampleCard.appendChild(sampleTitle);
+  const form = section.querySelector("#report-form");
+  const confirmArea = section.querySelector("#confirmation-card-area");
+  _attachReportHandlers(form, confirmArea);
+}
 
-  const sampleButtons = document.createElement("div");
-  sampleButtons.className = "sample-buttons";
+/**
+ * Build quick sample report selection buttons.
+ * @returns {HTMLElement} Sample selector card.
+ */
+function _buildSampleCards() {
   const samplesList = [
     { key: "pothole", label: "🚧 " + t("sample_pothole") },
     { key: "garbage", label: "🗑️ " + t("sample_garbage") },
@@ -88,422 +95,517 @@ export function renderReportView(container) {
     { key: "light", label: "💡 " + t("sample_light") },
   ];
 
-  samplesList.forEach(({ key, label }) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "btn btn-outline btn-sm sample-btn";
-    btn.textContent = label;
-    btn.addEventListener("click", () => fillSample(key));
-    sampleButtons.appendChild(btn);
-  });
-  sampleCard.appendChild(sampleButtons);
-  section.appendChild(sampleCard);
-
-  // Main Report Form
-  const form = document.createElement("form");
-  form.className = "report-form card";
-  form.id = "report-form";
-
-  // Form body fields
-  form.innerHTML = `
-    <div class="form-group">
-      <label for="rep-desc">${t("lbl_desc")} <span class="required">*</span></label>
-      <textarea id="rep-desc" rows="4" required class="form-control" placeholder="${t("lbl_desc_placeholder")}"></textarea>
-      <div id="assist-box" class="assist-box hidden" aria-live="polite"></div>
-    </div>
-
-    <div class="form-group">
-      <label for="rep-title">${t("lbl_title")}</label>
-      <input type="text" id="rep-title" class="form-control" placeholder="Brief headline, or leave blank for AI to suggest" />
-    </div>
-
-    <div class="form-grid">
-      <div class="form-group">
-        <label for="rep-category">${t("lbl_category")}</label>
-        <select id="rep-category" class="form-control">
-          <option value="Let AI decide">${t("lbl_category_ai")}</option>
-          <option value="Pothole">Pothole</option>
-          <option value="Overflowing Garbage">Overflowing Garbage</option>
-          <option value="Damaged Streetlight">Damaged Streetlight</option>
-          <option value="Water Leakage">Water Leakage</option>
-          <option value="Exposed Live Wire">Exposed Live Wire</option>
-          <option value="Stray Animals">Stray Animals</option>
-          <option value="Illegal Dumping">Illegal Dumping</option>
-          <option value="Sewage Overflow">Sewage Overflow</option>
-          <option value="Noise Complaint">Noise Complaint</option>
-          <option value="Other">Other</option>
-        </select>
-      </div>
-
-      <div class="form-group">
-        <label for="rep-location">${t("lbl_location")}</label>
-        <div class="input-with-button">
-          <input type="text" id="rep-location" class="form-control" placeholder="${t("lbl_location_placeholder")}" />
-          <button type="button" id="btn-geo" class="btn btn-secondary btn-sm" title="Use current GPS">📍 GPS</button>
-        </div>
-        <small id="geo-status" class="form-help"></small>
-      </div>
-    </div>
-
-    <div class="form-grid">
-      <div class="form-group">
-        <label for="rep-photo">${t("lbl_photo")}</label>
-        <input type="file" id="rep-photo" accept="image/jpeg,image/png,image/webp" class="form-control" />
-        <small class="form-help">Client-side resized to max 800px JPEG &lt;= 300KB</small>
-        <div id="photo-preview" class="photo-preview hidden"></div>
-      </div>
-
-      <div class="form-group">
-        <label for="rep-name">${t("lbl_name")}</label>
-        <input type="text" id="rep-name" class="form-control" placeholder="e.g. Anand Kumar" />
-      </div>
-    </div>
-
-    <input type="hidden" id="rep-lat" value="" />
-    <input type="hidden" id="rep-lon" value="" />
-
-    <div id="form-alert" class="alert hidden" role="alert" aria-live="assertive"></div>
-
-    <div class="form-actions">
-      <button type="submit" id="btn-submit" class="btn btn-primary btn-lg">
-        <span class="btn-text">${t("btn_submit_report")}</span>
-        <span class="spinner hidden" aria-hidden="true"></span>
-      </button>
-    </div>
-  `;
-
-  section.appendChild(form);
-
-  // Container for Confirmation Card after submit
-  const confirmContainer = document.createElement("div");
-  confirmContainer.id = "confirmation-card-area";
-  section.appendChild(confirmContainer);
-
-  container.appendChild(section);
-
-  // Attach Event Handlers
-  attachReportHandlers(form, confirmContainer);
+  return h(
+    "div",
+    { className: "card sample-card" },
+    h("p", { className: "sample-title" }, h("strong", {}, t("sample_title"))),
+    h(
+      "div",
+      { className: "sample-buttons" },
+      ...samplesList.map(({ key, label }) =>
+        h("button", {
+          type: "button",
+          className: "btn btn-outline btn-sm sample-btn",
+          onclick: () => _fillSample(key),
+        }, label)
+      )
+    )
+  );
 }
 
-function fillSample(sampleKey) {
+/**
+ * Populate report form fields with preset sample data.
+ * @param {string} sampleKey - Key matching SAMPLES constant.
+ */
+function _fillSample(sampleKey) {
   const data = SAMPLES[sampleKey];
   if (!data) return;
 
-  const descEl = document.getElementById("rep-desc");
-  const titleEl = document.getElementById("rep-title");
-  const catEl = document.getElementById("rep-category");
-  const locEl = document.getElementById("rep-location");
-  const latEl = document.getElementById("rep-lat");
-  const lonEl = document.getElementById("rep-lon");
+  const fields = {
+    "rep-desc": data.description,
+    "rep-title": data.title,
+    "rep-category": data.category,
+    "rep-location": data.address,
+    "rep-lat": String(data.lat),
+    "rep-lon": String(data.lon),
+  };
 
-  if (descEl) descEl.value = data.description;
-  if (titleEl) titleEl.value = data.title;
-  if (catEl) catEl.value = data.category;
-  if (locEl) locEl.value = data.address;
-  if (latEl) latEl.value = data.lat;
-  if (lonEl) lonEl.value = data.lon;
+  for (const [id, val] of Object.entries(fields)) {
+    const el = document.getElementById(id);
+    if (el) el.value = val;
+  }
 
-  // Scroll to form smoothly
   const form = document.getElementById("report-form");
   if (form) form.scrollIntoView({ behavior: "smooth" });
 }
 
-function attachReportHandlers(form, confirmContainer) {
+/**
+ * Construct the comprehensive report submission form.
+ * @returns {HTMLFormElement} Complete grievance form element.
+ */
+function _buildReportForm() {
+  return h(
+    "form",
+    { className: "report-form card", id: "report-form" },
+    _buildDescriptionField(),
+    _buildTitleField(),
+    _buildCategoryLocationGrid(),
+    _buildPhotoNameGrid(),
+    h("input", { type: "hidden", id: "rep-lat", value: "" }),
+    h("input", { type: "hidden", id: "rep-lon", value: "" }),
+    h("div", { id: "form-alert", className: "alert hidden", role: "alert", "aria-live": "assertive" }),
+    _buildFormSubmitActions()
+  );
+}
+
+function _buildDescriptionField() {
+  return h(
+    "div",
+    { className: "form-group" },
+    h("label", { for: "rep-desc" }, t("lbl_desc"), " ", h("span", { className: "required" }, "*")),
+    h("textarea", {
+      id: "rep-desc",
+      rows: 4,
+      required: true,
+      className: "form-control",
+      placeholder: t("lbl_desc_placeholder"),
+    }),
+    h("div", { id: "assist-box", className: "assist-box hidden", "aria-live": "polite" })
+  );
+}
+
+function _buildTitleField() {
+  return h(
+    "div",
+    { className: "form-group" },
+    h("label", { for: "rep-title" }, t("lbl_title")),
+    h("input", {
+      type: "text",
+      id: "rep-title",
+      className: "form-control",
+      placeholder: "Brief headline, or leave blank for AI to suggest",
+    })
+  );
+}
+
+function _buildCategoryLocationGrid() {
+  const categories = [
+    ["Let AI decide", t("lbl_category_ai")],
+    ["Pothole", "Pothole"],
+    ["Overflowing Garbage", "Overflowing Garbage"],
+    ["Damaged Streetlight", "Damaged Streetlight"],
+    ["Water Leakage", "Water Leakage"],
+    ["Exposed Live Wire", "Exposed Live Wire"],
+    ["Stray Animals", "Stray Animals"],
+    ["Illegal Dumping", "Illegal Dumping"],
+    ["Sewage Overflow", "Sewage Overflow"],
+    ["Noise Complaint", "Noise Complaint"],
+    ["Other", "Other"],
+  ];
+
+  return h(
+    "div",
+    { className: "form-grid" },
+    h(
+      "div",
+      { className: "form-group" },
+      h("label", { for: "rep-category" }, t("lbl_category")),
+      h(
+        "select",
+        { id: "rep-category", className: "form-control" },
+        ...categories.map(([val, label]) => h("option", { value: val }, label))
+      )
+    ),
+    h(
+      "div",
+      { className: "form-group" },
+      h("label", { for: "rep-location" }, t("lbl_location")),
+      h(
+        "div",
+        { className: "input-with-button" },
+        h("input", {
+          type: "text",
+          id: "rep-location",
+          className: "form-control",
+          placeholder: t("lbl_location_placeholder"),
+        }),
+        h("button", {
+          type: "button",
+          id: "btn-geo",
+          className: "btn btn-secondary btn-sm",
+          title: "Use current GPS",
+        }, "📍 GPS")
+      ),
+      h("small", { id: "geo-status", className: "form-help" })
+    )
+  );
+}
+
+function _buildPhotoNameGrid() {
+  return h(
+    "div",
+    { className: "form-grid" },
+    h(
+      "div",
+      { className: "form-group" },
+      h("label", { for: "rep-photo" }, t("lbl_photo")),
+      h("input", {
+        type: "file",
+        id: "rep-photo",
+        accept: "image/jpeg,image/png,image/webp",
+        className: "form-control",
+      }),
+      h("small", { className: "form-help" }, "Client-side resized to max 800px JPEG <= 300KB"),
+      h("div", { id: "photo-preview", className: "photo-preview hidden" })
+    ),
+    h(
+      "div",
+      { className: "form-group" },
+      h("label", { for: "rep-name" }, t("lbl_name")),
+      h("input", {
+        type: "text",
+        id: "rep-name",
+        className: "form-control",
+        placeholder: "e.g. Anand Kumar",
+      })
+    )
+  );
+}
+
+function _buildFormSubmitActions() {
+  return h(
+    "div",
+    { className: "form-actions" },
+    h(
+      "button",
+      { type: "submit", id: "btn-submit", className: "btn btn-primary btn-lg" },
+      h("span", { className: "btn-text" }, t("btn_submit_report")),
+      h("span", { className: "spinner hidden", "aria-hidden": "true" })
+    )
+  );
+}
+
+/**
+ * Bind interactive events for geolocation, image preview, AI assist, and submission.
+ */
+function _attachReportHandlers(form, confirmContainer) {
   let photoDataUrl = null;
-  let assistDebounce = null;
 
-  // Geolocation button
-  const geoBtn = document.getElementById("btn-geo");
-  const geoStatus = document.getElementById("geo-status");
-  if (geoBtn) {
-    geoBtn.addEventListener("click", () => {
-      if (!navigator.geolocation) {
-        geoStatus.textContent = "Geolocation is not supported by your browser.";
-        return;
-      }
-      geoStatus.textContent = "Acquiring GPS coordinates...";
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          document.getElementById("rep-lat").value = pos.coords.latitude.toFixed(6);
-          document.getElementById("rep-lon").value = pos.coords.longitude.toFixed(6);
-          geoStatus.textContent = `GPS Captured: (${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)})`;
-        },
-        (err) => {
-          geoStatus.textContent = "Unable to fetch GPS. You may enter landmark manually.";
-        },
-        { timeout: 8000 }
-      );
-    });
-  }
+  _bindGeolocation();
+  _bindPhotoResizer((dataUrl) => {
+    photoDataUrl = dataUrl;
+  });
+  _bindAiAssist();
 
-  // Client-side photo resizing
-  const photoInput = document.getElementById("rep-photo");
-  const photoPreview = document.getElementById("photo-preview");
-  if (photoInput) {
-    photoInput.addEventListener("change", (e) => {
-      const file = e.target.files[0];
-      if (!file) {
-        photoDataUrl = null;
-        photoPreview.classList.add("hidden");
-        return;
-      }
-
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const img = new Image();
-        img.onload = () => {
-          const maxDim = 800;
-          let width = img.width;
-          let height = img.height;
-          if (width > maxDim || height > maxDim) {
-            if (width > height) {
-              height = Math.round((height * maxDim) / width);
-              width = maxDim;
-            } else {
-              width = Math.round((width * maxDim) / height);
-              height = maxDim;
-            }
-          }
-
-          const canvas = document.createElement("canvas");
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext("2d");
-          ctx.drawImage(img, 0, 0, width, height);
-
-          // Compress to JPEG with quality 0.75
-          photoDataUrl = canvas.toDataURL("image/jpeg", 0.75);
-
-          photoPreview.innerHTML = "";
-          const previewImg = document.createElement("img");
-          previewImg.src = photoDataUrl;
-          previewImg.alt = "Resized upload preview";
-          previewImg.className = "img-thumbnail";
-          photoPreview.appendChild(previewImg);
-          photoPreview.classList.remove("hidden");
-        };
-        img.src = event.target.result;
-      };
-      reader.readAsDataURL(file);
-    });
-  }
-
-  // AI Assist on description change
-  const descEl = document.getElementById("rep-desc");
-  const assistBox = document.getElementById("assist-box");
-  if (descEl && assistBox) {
-    descEl.addEventListener("input", () => {
-      clearTimeout(assistDebounce);
-      const text = descEl.value.trim();
-      if (text.length < 25) {
-        assistBox.classList.add("hidden");
-        return;
-      }
-      assistDebounce = setTimeout(async () => {
-        try {
-          const res = await api.getAssist(text);
-          renderAssistBox(assistBox, res);
-        } catch {
-          // Silent fallback on assist error
-        }
-      }, 900);
-    });
-  }
-
-  // Form submission
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const alertBox = document.getElementById("form-alert");
-    const submitBtn = document.getElementById("btn-submit");
-    const btnText = submitBtn.querySelector(".btn-text");
-    const spinner = submitBtn.querySelector(".spinner");
-
-    alertBox.className = "alert hidden";
-    submitBtn.disabled = true;
-    btnText.textContent = "Analyzing & Lodging Grievance...";
-    spinner.classList.remove("hidden");
-
-    const description = document.getElementById("rep-desc").value.trim();
-    const title = document.getElementById("rep-title").value.trim() || null;
-    const categoryVal = document.getElementById("rep-category").value;
-    const category = categoryVal === "Let AI decide" ? null : categoryVal;
-    const address = document.getElementById("rep-location").value.trim() || null;
-    const citizenName = document.getElementById("rep-name").value.trim() || null;
-    const lat = parseFloat(document.getElementById("rep-lat").value) || null;
-    const lon = parseFloat(document.getElementById("rep-lon").value) || null;
-
-    try {
-      const issue = await api.createIssue({
-        description,
-        title,
-        category,
-        address,
-        citizen_name: citizenName,
-        latitude: lat,
-        longitude: lon,
-        photo_data_url: photoDataUrl,
-      });
-
-      // Hide form and show confirmation card
-      form.classList.add("hidden");
-      renderConfirmationCard(confirmContainer, issue);
-      confirmContainer.scrollIntoView({ behavior: "smooth" });
-    } catch (err) {
-      alertBox.textContent = `Submission Error: ${err.message || "Failed to submit report"}`;
-      alertBox.className = "alert alert-error";
-      alertBox.classList.remove("hidden");
-    } finally {
-      submitBtn.disabled = false;
-      btnText.textContent = t("btn_submit_report");
-      spinner.classList.add("hidden");
-    }
+    await _handleFormSubmit(form, confirmContainer, photoDataUrl);
   });
 }
 
-function renderAssistBox(box, assistData) {
-  box.innerHTML = "";
+function _bindGeolocation() {
+  const geoBtn = document.getElementById("btn-geo");
+  const geoStatus = document.getElementById("geo-status");
+  if (!geoBtn || !geoStatus) return;
+
+  geoBtn.addEventListener("click", () => {
+    if (!navigator.geolocation) {
+      geoStatus.textContent = "Geolocation is not supported by your browser.";
+      return;
+    }
+    geoStatus.textContent = "Acquiring GPS coordinates...";
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        document.getElementById("rep-lat").value = pos.coords.latitude.toFixed(6);
+        document.getElementById("rep-lon").value = pos.coords.longitude.toFixed(6);
+        geoStatus.textContent = `GPS Captured: (${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)})`;
+      },
+      () => {
+        geoStatus.textContent = "Unable to fetch GPS. You may enter landmark manually.";
+      },
+      { timeout: 8000 }
+    );
+  });
+}
+
+function _bindPhotoResizer(onPhotoProcessed) {
+  const photoInput = document.getElementById("rep-photo");
+  const photoPreview = document.getElementById("photo-preview");
+  if (!photoInput || !photoPreview) return;
+
+  photoInput.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) {
+      onPhotoProcessed(null);
+      photoPreview.classList.add("hidden");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const compressed = _compressImage(img);
+        onPhotoProcessed(compressed);
+        clear(photoPreview);
+        photoPreview.appendChild(
+          h("img", {
+            src: compressed,
+            alt: "Resized upload preview",
+            className: "img-thumbnail",
+          })
+        );
+        photoPreview.classList.remove("hidden");
+      };
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function _compressImage(img) {
+  const maxDim = 800;
+  let { width, height } = img;
+  if (width > maxDim || height > maxDim) {
+    if (width > height) {
+      height = Math.round((height * maxDim) / width);
+      width = maxDim;
+    } else {
+      width = Math.round((width * maxDim) / height);
+      height = maxDim;
+    }
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0, width, height);
+  return canvas.toDataURL("image/jpeg", 0.75);
+}
+
+function _bindAiAssist() {
+  const descEl = document.getElementById("rep-desc");
+  const assistBox = document.getElementById("assist-box");
+  if (!descEl || !assistBox) return;
+
+  let debounceTimer = null;
+  descEl.addEventListener("input", () => {
+    clearTimeout(debounceTimer);
+    const text = descEl.value.trim();
+    if (text.length < 25) {
+      assistBox.classList.add("hidden");
+      return;
+    }
+    debounceTimer = setTimeout(async () => {
+      try {
+        const res = await api.getAssist(text);
+        _renderAssistBox(assistBox, res);
+      } catch {
+        // Silent fallback on assist timeout or service absence
+      }
+    }, 900);
+  });
+}
+
+function _renderAssistBox(box, assistData) {
+  clear(box);
   if (!assistData) return;
 
-  const header = document.createElement("div");
-  header.className = "assist-header";
-  header.innerHTML = `✨ <strong>AI Suggestion</strong>`;
-  box.appendChild(header);
+  const children = [
+    h("div", { className: "assist-header" }, "✨ ", h("strong", {}, "AI Suggestion")),
+  ];
 
   if (assistData.suggested_title) {
-    const titleDiv = document.createElement("div");
-    titleDiv.className = "assist-title-row";
-    titleDiv.innerHTML = `<span>Title: <em>${escapeHtml(assistData.suggested_title)}</em></span>`;
-    const useBtn = document.createElement("button");
-    useBtn.type = "button";
-    useBtn.className = "btn btn-link btn-sm";
-    useBtn.textContent = "Apply Title";
-    useBtn.addEventListener("click", () => {
-      const titleInput = document.getElementById("rep-title");
-      if (titleInput) titleInput.value = assistData.suggested_title;
-    });
-    titleDiv.appendChild(useBtn);
-    box.appendChild(titleDiv);
+    children.push(
+      h(
+        "div",
+        { className: "assist-title-row" },
+        h("span", {}, "Title: ", h("em", {}, assistData.suggested_title)),
+        h("button", {
+          type: "button",
+          className: "btn btn-link btn-sm",
+          onclick: () => {
+            const titleInput = document.getElementById("rep-title");
+            if (titleInput) titleInput.value = assistData.suggested_title;
+          },
+        }, "Apply Title")
+      )
+    );
   }
 
   if (assistData.clarifying_questions && assistData.clarifying_questions.length > 0) {
-    const qList = document.createElement("ul");
-    qList.className = "assist-questions";
-    assistData.clarifying_questions.forEach((q) => {
-      const li = document.createElement("li");
-      li.textContent = `💡 ${q}`;
-      qList.appendChild(li);
-    });
-    box.appendChild(qList);
+    children.push(
+      h(
+        "ul",
+        { className: "assist-questions" },
+        ...assistData.clarifying_questions.map((q) => h("li", {}, `💡 ${q}`))
+      )
+    );
   }
 
+  children.forEach((c) => box.appendChild(c));
   box.classList.remove("hidden");
 }
 
-function renderConfirmationCard(container, issue) {
-  container.innerHTML = "";
+async function _handleFormSubmit(form, confirmContainer, photoDataUrl) {
+  const alertBox = document.getElementById("form-alert");
+  const submitBtn = document.getElementById("btn-submit");
+  const btnText = submitBtn.querySelector(".btn-text");
+  const spinner = submitBtn.querySelector(".spinner");
 
-  const card = document.createElement("div");
-  card.className = "card confirmation-card";
-  card.setAttribute("role", "status");
-  card.setAttribute("aria-live", "polite");
+  alertBox.className = "alert hidden";
+  submitBtn.disabled = true;
+  btnText.textContent = "Analyzing & Lodging Grievance...";
+  spinner.classList.remove("hidden");
 
-  const aiSourceBadge = issue.ai_analysis?.ai_generated
-    ? `<span class="badge badge-ai">⚡ Multimodal Gemini Triaged</span>`
-    : `<span class="badge badge-rules">🛡️ Heuristic Rule Triaged</span>`;
+  const payload = _extractFormData(photoDataUrl);
 
-  let priorityClass = "badge-low";
-  if (issue.priority_level === "Critical") priorityClass = "badge-critical";
-  else if (issue.priority_level === "High") priorityClass = "badge-high";
-  else if (issue.priority_level === "Medium") priorityClass = "badge-medium";
-
-  // Priority factors breakdown list
-  const factorsHtml = (issue.priority_breakdown || [])
-    .map((f) => `<li><strong>${escapeHtml(f.factor)} (+${f.points} pts):</strong> ${escapeHtml(f.explanation)}</li>`)
-    .join("");
-
-  // Duplicates list if any
-  let dupsHtml = "";
-  if (issue.duplicates && issue.duplicates.length > 0) {
-    dupsHtml = `
-      <div class="duplicate-alert-box">
-        <h4>⚠️ Potential Duplicate Issues Nearby (${issue.duplicates.length})</h4>
-        <p class="small text-muted">Similar issues reported nearby have been cross-referenced.</p>
-        <ul>
-          ${issue.duplicates
-            .map(
-              (d) =>
-                `<li><a href="#/track?id=${encodeURIComponent(d.ticket_id)}">${escapeHtml(d.ticket_id)}</a> - ${escapeHtml(d.title)} (${d.distance_meters}m away)</li>`
-            )
-            .join("")}
-        </ul>
-      </div>
-    `;
-  }
-
-  card.innerHTML = `
-    <div class="confirm-header">
-      <div class="confirm-icon">✅</div>
-      <div>
-        <h2>${t("confirm_title")}</h2>
-        <div class="ticket-display">
-          <span>${t("confirm_ticket")}</span>
-          <strong class="ticket-id-highlight">${escapeHtml(issue.ticket_id)}</strong>
-          ${aiSourceBadge}
-        </div>
-      </div>
-    </div>
-
-    <div class="confirm-grid">
-      <div class="confirm-item">
-        <label>${t("confirm_category")}</label>
-        <div><strong>${escapeHtml(issue.category)}</strong></div>
-      </div>
-      <div class="confirm-item">
-        <label>${t("confirm_priority")}</label>
-        <div><span class="badge ${priorityClass}">${escapeHtml(issue.priority_level)} (${issue.priority_score}/100)</span></div>
-      </div>
-      <div class="confirm-item">
-        <label>${t("confirm_dept")}</label>
-        <div><strong>${escapeHtml(issue.department)}</strong></div>
-      </div>
-      <div class="confirm-item">
-        <label>${t("confirm_sla")}</label>
-        <div><strong>${issue.sla_hours} Hours Target</strong></div>
-      </div>
-    </div>
-
-    <div class="priority-breakdown-box">
-      <h3>${t("confirm_why_priority")}</h3>
-      <ul class="factors-list">
-        ${factorsHtml || "<li>Standard baseline triage calculation applied.</li>"}
-      </ul>
-    </div>
-
-    ${dupsHtml}
-
-    <div class="confirm-actions">
-      <a href="#/track?id=${encodeURIComponent(issue.ticket_id)}" class="btn btn-primary btn-lg">${t("btn_track_this")}</a>
-      <button type="button" id="btn-report-another" class="btn btn-outline btn-lg">${t("btn_report_another")}</button>
-    </div>
-  `;
-
-  container.appendChild(card);
-
-  const anotherBtn = document.getElementById("btn-report-another");
-  if (anotherBtn) {
-    anotherBtn.addEventListener("click", () => {
-      router.navigate("/report");
-      window.location.reload();
-    });
+  try {
+    const issue = await api.createIssue(payload);
+    form.classList.add("hidden");
+    _renderConfirmationCard(confirmContainer, issue);
+    confirmContainer.scrollIntoView({ behavior: "smooth" });
+  } catch (err) {
+    clear(alertBox);
+    alertBox.textContent = `Submission Error: ${err.message || "Failed to submit report"}`;
+    alertBox.className = "alert alert-error";
+    alertBox.classList.remove("hidden");
+  } finally {
+    submitBtn.disabled = false;
+    btnText.textContent = t("btn_submit_report");
+    spinner.classList.add("hidden");
   }
 }
 
-function escapeHtml(str) {
-  if (!str) return "";
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+function _extractFormData(photoDataUrl) {
+  const categoryVal = document.getElementById("rep-category").value;
+  return {
+    description: document.getElementById("rep-desc").value.trim(),
+    title: document.getElementById("rep-title").value.trim() || null,
+    category: categoryVal === "Let AI decide" ? null : categoryVal,
+    address: document.getElementById("rep-location").value.trim() || null,
+    citizen_name: document.getElementById("rep-name").value.trim() || null,
+    latitude: parseFloat(document.getElementById("rep-lat").value) || null,
+    longitude: parseFloat(document.getElementById("rep-lon").value) || null,
+    photo_data_url: photoDataUrl,
+  };
+}
+
+function _renderConfirmationCard(container, issue) {
+  clear(container);
+
+  const card = h(
+    "div",
+    { className: "card confirmation-card", role: "status", "aria-live": "polite" },
+    _buildConfirmHeader(issue),
+    _buildConfirmGrid(issue),
+    _buildPriorityFactorsBox(issue),
+    _buildDuplicatesBox(issue.duplicates),
+    _buildConfirmActions(issue.ticket_id)
+  );
+
+  container.appendChild(card);
+}
+
+function _buildConfirmHeader(issue) {
+  const aiBadge = issue.ai_analysis?.ai_generated
+    ? h("span", { className: "badge badge-ai" }, "⚡ Multimodal Gemini Triaged")
+    : h("span", { className: "badge badge-rules" }, "🛡️ Heuristic Rule Triaged");
+
+  return h(
+    "div",
+    { className: "confirm-header" },
+    h("div", { className: "confirm-icon" }, "✅"),
+    h(
+      "div",
+      {},
+      h("h2", {}, t("confirm_title")),
+      h(
+        "div",
+        { className: "ticket-display" },
+        h("span", {}, t("confirm_ticket"), " "),
+        h("strong", { className: "ticket-id-highlight" }, issue.ticket_id),
+        " ",
+        aiBadge
+      )
+    )
+  );
+}
+
+function _buildConfirmGrid(issue) {
+  const pBadgeClass = _getPriorityBadgeClass(issue.priority_level);
+
+  return h(
+    "div",
+    { className: "confirm-grid" },
+    h("div", { className: "confirm-item" }, h("label", {}, t("confirm_category")), h("div", {}, h("strong", {}, issue.category))),
+    h("div", { className: "confirm-item" }, h("label", {}, t("confirm_priority")), h("div", {}, h("span", { className: `badge ${pBadgeClass}` }, `${issue.priority_level} (${issue.priority_score}/100)`))),
+    h("div", { className: "confirm-item" }, h("label", {}, t("confirm_dept")), h("div", {}, h("strong", {}, issue.department))),
+    h("div", { className: "confirm-item" }, h("label", {}, t("confirm_sla")), h("div", {}, h("strong", {}, `${issue.sla_hours} Hours Target`)))
+  );
+}
+
+function _getPriorityBadgeClass(level) {
+  if (level === "Critical") return "badge-critical";
+  if (level === "High") return "badge-high";
+  if (level === "Medium") return "badge-medium";
+  return "badge-low";
+}
+
+function _buildPriorityFactorsBox(issue) {
+  const factors = issue.priority_breakdown || [];
+  const listItems = factors.length > 0
+    ? factors.map((f) =>
+        h("li", {}, h("strong", {}, `${f.factor} (+${f.points} pts): `), f.explanation)
+      )
+    : [h("li", {}, "Standard baseline triage calculation applied.")];
+
+  return h(
+    "div",
+    { className: "priority-breakdown-box" },
+    h("h3", {}, t("confirm_why_priority")),
+    h("ul", { className: "factors-list" }, ...listItems)
+  );
+}
+
+function _buildDuplicatesBox(duplicates) {
+  if (!duplicates || duplicates.length === 0) return null;
+
+  return h(
+    "div",
+    { className: "duplicate-alert-box" },
+    h("h4", {}, `⚠️ Potential Duplicate Issues Nearby (${duplicates.length})`),
+    h("p", { className: "small text-muted" }, "Similar issues reported nearby have been cross-referenced."),
+    h(
+      "ul",
+      {},
+      ...duplicates.map((d) =>
+        h("li", {},
+          h("a", { href: `#/track?id=${encodeURIComponent(d.ticket_id)}` }, d.ticket_id),
+          ` - ${d.title} (${d.distance_meters}m away)`
+        )
+      )
+    )
+  );
+}
+
+function _buildConfirmActions(ticketId) {
+  return h(
+    "div",
+    { className: "confirm-actions" },
+    h("a", {
+      href: `#/track?id=${encodeURIComponent(ticketId)}`,
+      className: "btn btn-primary btn-lg",
+    }, t("btn_track_this")),
+    h("button", {
+      type: "button",
+      id: "btn-report-another",
+      className: "btn btn-outline btn-lg",
+      onclick: () => {
+        router.navigate("/report");
+        window.location.reload();
+      },
+    }, t("btn_report_another"))
+  );
 }

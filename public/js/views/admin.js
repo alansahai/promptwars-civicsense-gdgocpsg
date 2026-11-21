@@ -1,62 +1,96 @@
 /**
  * Protected Municipal Administrative Console View.
+ *
  * Provides issue management, AI overrides, status workflow transitions,
  * workload distribution metrics, and Gemini-generated weekly operational summaries.
+ * Built entirely with safe DOM constructors with zero innerHTML.
  */
 
 import { api, getAuthToken, setAuthToken } from "../api.js";
 import { openModal } from "../components/modal.js";
+import { clear, h } from "../dom.js";
 import { t } from "../i18n.js";
 
+/**
+ * Render administrative portal entry (login or dashboard).
+ * @param {HTMLElement} container - Host container element.
+ */
 export async function renderAdminView(container) {
-  container.innerHTML = "";
+  clear(container);
 
-  const section = document.createElement("section");
-  section.className = "view-section admin-view";
+  const section = h("section", { className: "view-section admin-view" });
   container.appendChild(section);
 
   const token = getAuthToken();
   if (!token) {
-    renderLoginForm(section);
+    _renderLoginForm(section);
   } else {
-    await renderDashboardContent(section);
+    await _renderDashboardContent(section);
   }
 }
 
-function renderLoginForm(container) {
-  container.innerHTML = `
-    <div class="admin-login-wrapper">
-      <div class="card login-card">
-        <div class="login-header">
-          <div class="login-icon">🔒</div>
-          <h2>${t("admin_login_title")}</h2>
-          <p class="subtitle">${t("admin_login_sub")}</p>
-        </div>
+function _renderLoginForm(container) {
+  clear(container);
 
-        <div class="demo-auth-pill">
-          <span>Demo Password:</span>
-          <code>civic-demo-2026</code>
-        </div>
+  const formEl = _buildLoginFormElements();
+  const wrapper = h(
+    "div",
+    { className: "admin-login-wrapper" },
+    h(
+      "div",
+      { className: "card login-card" },
+      h(
+        "div",
+        { className: "login-header" },
+        h("div", { className: "login-icon" }, "🔒"),
+        h("h2", {}, t("admin_login_title")),
+        h("p", { className: "subtitle" }, t("admin_login_sub"))
+      ),
+      h(
+        "div",
+        { className: "demo-auth-pill" },
+        h("span", {}, "Demo Password: "),
+        h("code", {}, "civic-demo-2026")
+      ),
+      formEl
+    )
+  );
 
-        <form id="admin-login-form">
-          <div class="form-group">
-            <label for="admin-pwd">${t("admin_pwd_label")}</label>
-            <input type="password" id="admin-pwd" class="form-control" value="civic-demo-2026" required autofocus />
-          </div>
-          <div id="login-error" class="alert alert-error hidden" role="alert"></div>
-          <button type="submit" id="btn-login-submit" class="btn btn-primary btn-block">
-            <span class="btn-text">${t("btn_login")}</span>
-            <span class="spinner hidden" aria-hidden="true"></span>
-          </button>
-        </form>
-      </div>
-    </div>
-  `;
+  container.appendChild(wrapper);
+  _bindLoginSubmit(formEl, container);
+}
 
-  const form = container.querySelector("#admin-login-form");
-  const pwdInput = container.querySelector("#admin-pwd");
-  const errorBox = container.querySelector("#login-error");
-  const submitBtn = container.querySelector("#btn-login-submit");
+function _buildLoginFormElements() {
+  return h(
+    "form",
+    { id: "admin-login-form" },
+    h(
+      "div",
+      { className: "form-group" },
+      h("label", { for: "admin-pwd" }, t("admin_pwd_label")),
+      h("input", {
+        type: "password",
+        id: "admin-pwd",
+        className: "form-control",
+        value: "civic-demo-2026",
+        required: true,
+        autofocus: true,
+      })
+    ),
+    h("div", { id: "login-error", className: "alert alert-error hidden", role: "alert" }),
+    h(
+      "button",
+      { type: "submit", id: "btn-login-submit", className: "btn btn-primary btn-block" },
+      h("span", { className: "btn-text" }, t("btn_login")),
+      h("span", { className: "spinner hidden", "aria-hidden": "true" })
+    )
+  );
+}
+
+function _bindLoginSubmit(form, container) {
+  const pwdInput = form.querySelector("#admin-pwd");
+  const errorBox = form.querySelector("#login-error");
+  const submitBtn = form.querySelector("#btn-login-submit");
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -76,184 +110,232 @@ function renderLoginForm(container) {
   });
 }
 
-async function renderDashboardContent(container) {
-  container.innerHTML = `
-    <div class="admin-header-bar">
-      <div>
-        <h1>${t("admin_heading")}</h1>
-        <p class="subtitle">Operational Dispatch &amp; Departmental Workflow Console</p>
-      </div>
-      <div class="admin-top-actions">
-        <button id="btn-summary" class="btn btn-secondary">✨ ${t("btn_generate_summary")}</button>
-        <button id="btn-logout" class="btn btn-outline">${t("btn_logout")}</button>
-      </div>
-    </div>
+async function _renderDashboardContent(container) {
+  clear(container);
 
-    <div id="admin-analytics-area" class="admin-analytics-area">
-      <div class="loading-spinner">Loading operational analytics...</div>
-    </div>
+  container.appendChild(_buildAdminHeaderBar(container));
+  container.appendChild(
+    h(
+      "div",
+      { id: "admin-analytics-area", className: "admin-analytics-area" },
+      h("div", { className: "loading-spinner" }, "Loading operational analytics...")
+    )
+  );
+  container.appendChild(_buildAdminTableCard());
 
-    <div class="card admin-table-card">
-      <div class="table-header">
-        <h2>${t("admin_issues_title")}</h2>
-        <small class="text-muted">Sorted deterministically by priority score, then age</small>
-      </div>
-      <div id="admin-table-container" class="table-responsive">
-        <div class="loading-spinner">Loading grievances...</div>
-      </div>
-    </div>
-  `;
-
-  // Attach top bar actions
-  document.getElementById("btn-logout").addEventListener("click", async () => {
-    try {
-      await api.logout();
-    } catch {}
-    setAuthToken(null);
-    renderAdminView(container.parentElement);
-  });
-
-  document.getElementById("btn-summary").addEventListener("click", () => {
-    openSummaryModal();
-  });
-
-  // Load analytics & table
-  await loadAdminData();
+  await _loadAdminData();
 }
 
-async function loadAdminData() {
+function _buildAdminHeaderBar(container) {
+  return h(
+    "div",
+    { className: "admin-header-bar" },
+    h(
+      "div",
+      {},
+      h("h1", {}, t("admin_heading")),
+      h("p", { className: "subtitle" }, "Operational Dispatch & Departmental Workflow Console")
+    ),
+    h(
+      "div",
+      { className: "admin-top-actions" },
+      h(
+        "button",
+        {
+          id: "btn-summary",
+          className: "btn btn-secondary",
+          onclick: () => _openSummaryModal(),
+        },
+        `✨ ${t("btn_generate_summary")}`
+      ),
+      h(
+        "button",
+        {
+          id: "btn-logout",
+          className: "btn btn-outline",
+          onclick: async () => {
+            try {
+              await api.logout();
+            } catch {}
+            setAuthToken(null);
+            renderAdminView(container.parentElement);
+          },
+        },
+        t("btn_logout")
+      )
+    )
+  );
+}
+
+function _buildAdminTableCard() {
+  return h(
+    "div",
+    { className: "card admin-table-card" },
+    h(
+      "div",
+      { className: "table-header" },
+      h("h2", {}, t("admin_issues_title")),
+      h("small", { className: "text-muted" }, "Sorted deterministically by priority score, then age")
+    ),
+    h(
+      "div",
+      { id: "admin-table-container", className: "table-responsive" },
+      h("div", { className: "loading-spinner" }, "Loading grievances...")
+    )
+  );
+}
+
+async function _loadAdminData() {
   try {
     const [analytics, issues] = await Promise.all([
       api.getAdminAnalytics(),
       api.listAdminIssues(),
     ]);
 
-    renderAnalytics(analytics);
-    renderAdminTable(issues);
+    _renderAnalytics(analytics);
+    _renderAdminTable(issues);
   } catch (err) {
     if (err.status === 401) {
       setAuthToken(null);
-      renderLoginForm(document.querySelector(".admin-view"));
+      renderAdminView(document.querySelector(".admin-view")?.parentElement || document.body);
       return;
     }
     const container = document.getElementById("admin-table-container");
     if (container) {
-      container.innerHTML = `<div class="alert alert-error">Failed to load dispatch data: ${err.message}</div>`;
+      clear(container);
+      container.appendChild(
+        h("div", { className: "alert alert-error" }, `Failed to load dispatch data: ${err.message}`)
+      );
     }
   }
 }
 
-function renderAnalytics(analytics) {
+function _renderAnalytics(analytics) {
   const container = document.getElementById("admin-analytics-area");
   if (!container) return;
 
-  const workloadItems = Object.entries(analytics.department_workload || {})
-    .map(
-      ([dept, count]) => `
-      <div class="workload-item">
-        <span class="dept-name">${escapeHtml(dept)}</span>
-        <span class="badge badge-progress">${count.open} open</span>
-        <span class="badge badge-resolved">${count.resolved} resolved</span>
-      </div>
-    `
-    )
-    .join("");
-
-  container.innerHTML = `
-    <div class="analytics-card card">
-      <h3>Departmental Workload Distribution</h3>
-      <div class="workload-grid">
-        ${workloadItems || "<p>No workload data.</p>"}
-      </div>
-    </div>
-
-    <div class="analytics-summary-cards">
-      <div class="card mini-stat-card ${analytics.overdue_count > 0 ? "stat-warn" : ""}">
-        <div class="stat-label">SLA Breached / Overdue</div>
-        <div class="stat-val">${analytics.overdue_count}</div>
-        <div class="stat-sub">Tickets exceeding resolution target</div>
-      </div>
-      <div class="card mini-stat-card">
-        <div class="stat-label">Admin Overrides</div>
-        <div class="stat-val">${analytics.admin_override_count} (${analytics.admin_override_rate_percent}%)</div>
-        <div class="stat-sub">Superintendent overrides applied</div>
-      </div>
-    </div>
-  `;
+  clear(container);
+  container.appendChild(_buildWorkloadCard(analytics.department_workload || {}));
+  container.appendChild(_buildSummaryMiniCards(analytics));
 }
 
-function renderAdminTable(issues) {
+function _buildWorkloadCard(workload) {
+  const items = Object.entries(workload);
+  const content = items.length > 0
+    ? items.map(([dept, count]) =>
+        h(
+          "div",
+          { className: "workload-item" },
+          h("span", { className: "dept-name" }, dept),
+          h("span", { className: "badge badge-progress" }, `${count.open} open`),
+          h("span", { className: "badge badge-resolved" }, `${count.resolved} resolved`)
+        )
+      )
+    : [h("p", {}, "No workload data.")];
+
+  return h(
+    "div",
+    { className: "analytics-card card" },
+    h("h3", {}, "Departmental Workload Distribution"),
+    h("div", { className: "workload-grid" }, ...content)
+  );
+}
+
+function _buildSummaryMiniCards(analytics) {
+  const overdueClass = analytics.overdue_count > 0 ? "stat-warn" : "";
+  return h(
+    "div",
+    { className: "analytics-summary-cards" },
+    h(
+      "div",
+      { className: `card mini-stat-card ${overdueClass}`.trim() },
+      h("div", { className: "stat-label" }, "SLA Breached / Overdue"),
+      h("div", { className: "stat-val" }, String(analytics.overdue_count)),
+      h("div", { className: "stat-sub" }, "Tickets exceeding resolution target")
+    ),
+    h(
+      "div",
+      { className: "card mini-stat-card" },
+      h("div", { className: "stat-label" }, "Admin Overrides"),
+      h("div", { className: "stat-val" }, `${analytics.admin_override_count} (${analytics.admin_override_rate_percent}%)`),
+      h("div", { className: "stat-sub" }, "Superintendent overrides applied")
+    )
+  );
+}
+
+function _renderAdminTable(issues) {
   const container = document.getElementById("admin-table-container");
   if (!container) return;
 
+  clear(container);
   if (issues.length === 0) {
-    container.innerHTML = `<p class="no-data">No grievances in queue.</p>`;
+    container.appendChild(h("p", { className: "no-data" }, "No grievances in queue."));
     return;
   }
 
-  const table = document.createElement("table");
-  table.className = "data-table admin-table";
-  table.innerHTML = `
-    <thead>
-      <tr>
-        <th>Ticket</th>
-        <th>Title</th>
-        <th>Category</th>
-        <th>Priority</th>
-        <th>Department</th>
-        <th>Status</th>
-        <th>Action</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${issues
-        .map((it) => {
-          let pBadge = "badge-low";
-          if (it.priority_level === "Critical") pBadge = "badge-critical";
-          else if (it.priority_level === "High") pBadge = "badge-high";
-          else if (it.priority_level === "Medium") pBadge = "badge-medium";
+  const table = h(
+    "table",
+    { className: "data-table admin-table" },
+    _buildAdminTableHeader(),
+    h("tbody", {}, ...issues.map(_buildAdminTableRow))
+  );
 
-          let sBadge = "badge-reported";
-          if (it.status === "In Progress") sBadge = "badge-progress";
-          else if (it.status === "Resolved") sBadge = "badge-resolved";
-          else if (it.status === "Rejected") sBadge = "badge-rejected";
-          else if (it.status === "Duplicate") sBadge = "badge-duplicate";
-
-          return `
-            <tr>
-              <td><strong>${escapeHtml(it.ticket_id)}</strong></td>
-              <td>${escapeHtml(it.title)}</td>
-              <td><span class="tag">${escapeHtml(it.category)}</span></td>
-              <td><span class="badge ${pBadge}">${escapeHtml(it.priority_level)} (${it.priority_score})</span></td>
-              <td>${escapeHtml(it.department)}</td>
-              <td><span class="badge ${sBadge}">${escapeHtml(it.status)}</span></td>
-              <td>
-                <button type="button" class="btn btn-outline btn-sm btn-manage" data-ticket="${escapeHtml(it.ticket_id)}">
-                  Manage
-                </button>
-              </td>
-            </tr>
-          `;
-        })
-        .join("")}
-    </tbody>
-  `;
-
-  container.innerHTML = "";
   container.appendChild(table);
-
-  table.querySelectorAll(".btn-manage").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const tid = btn.getAttribute("data-ticket");
-      if (tid) openManageModal(tid);
-    });
-  });
 }
 
-async function openManageModal(ticketId) {
-  const contentNode = document.createElement("div");
-  contentNode.className = "manage-modal-content";
-  contentNode.innerHTML = `<div class="loading-spinner">Loading issue details...</div>`;
+function _buildAdminTableHeader() {
+  return h(
+    "thead",
+    {},
+    h(
+      "tr",
+      {},
+      h("th", {}, "Ticket"),
+      h("th", {}, "Title"),
+      h("th", {}, "Category"),
+      h("th", {}, "Priority"),
+      h("th", {}, "Department"),
+      h("th", {}, "Status"),
+      h("th", {}, "Action")
+    )
+  );
+}
+
+function _buildAdminTableRow(it) {
+  const pBadge = _getPriorityBadgeClass(it.priority_level);
+  const sBadge = _getStatusBadgeClass(it.status);
+
+  return h(
+    "tr",
+    {},
+    h("td", {}, h("strong", {}, it.ticket_id)),
+    h("td", {}, it.title),
+    h("td", {}, h("span", { className: "tag" }, it.category)),
+    h("td", {}, h("span", { className: `badge ${pBadge}` }, `${it.priority_level} (${it.priority_score})`)),
+    h("td", {}, it.department),
+    h("td", {}, h("span", { className: `badge ${sBadge}` }, it.status)),
+    h(
+      "td",
+      {},
+      h(
+        "button",
+        {
+          type: "button",
+          className: "btn btn-outline btn-sm btn-manage",
+          onclick: () => _openManageModal(it.ticket_id),
+        },
+        "Manage"
+      )
+    )
+  );
+}
+
+async function _openManageModal(ticketId) {
+  const contentNode = h(
+    "div",
+    { className: "manage-modal-content" },
+    h("div", { className: "loading-spinner" }, "Loading issue details...")
+  );
 
   const modal = openModal({
     title: `Manage Grievance [${ticketId}]`,
@@ -263,101 +345,161 @@ async function openManageModal(ticketId) {
 
   try {
     const issue = await api.getIssue(ticketId);
-    renderManageForm(contentNode, issue, modal);
+    clear(contentNode);
+    _renderManageForm(contentNode, issue, modal);
   } catch (err) {
-    contentNode.innerHTML = `<div class="alert alert-error">Failed to load issue: ${err.message}</div>`;
+    clear(contentNode);
+    contentNode.appendChild(
+      h("div", { className: "alert alert-error" }, `Failed to load issue: ${err.message}`)
+    );
   }
 }
 
-function renderManageForm(container, issue, modal) {
+function _renderManageForm(container, issue, modal) {
+  const grid = h(
+    "div",
+    { className: "manage-grid" },
+    _buildManageInfoCol(issue),
+    _buildManageActionsCol(issue, modal)
+  );
+  container.appendChild(grid);
+}
+
+function _buildManageInfoCol(issue) {
   const ai = issue.ai_analysis;
-  const photoHtml = issue.photo_data_url
-    ? `<div class="modal-photo"><img src="${issue.photo_data_url}" alt="Civic Photo" class="img-responsive" /></div>`
-    : "";
+  const col = h(
+    "div",
+    { className: "manage-info" },
+    h("h3", {}, issue.title),
+    h("p", { className: "text-muted" }, `Reported on ${new Date(issue.created_at).toLocaleString()}`),
+    h("p", {}, h("strong", {}, "Description: "), issue.description),
+    h("p", {}, h("strong", {}, "Address: "), issue.address || "None specified")
+  );
 
-  container.innerHTML = `
-    <div class="manage-grid">
-      <div class="manage-info">
-        <h3>${escapeHtml(issue.title)}</h3>
-        <p class="text-muted">Reported on ${new Date(issue.created_at).toLocaleString()}</p>
-        <p><strong>Description:</strong> ${escapeHtml(issue.description)}</p>
-        <p><strong>Address:</strong> ${escapeHtml(issue.address || "None specified")}</p>
-        ${photoHtml}
+  if (issue.photo_data_url) {
+    col.appendChild(
+      h(
+        "div",
+        { className: "modal-photo" },
+        h("img", { src: issue.photo_data_url, alt: "Civic Photo", className: "img-responsive" })
+      )
+    );
+  }
 
-        <div class="ai-analysis-card card">
-          <h4>🤖 AI Triage Assessment</h4>
-          <p><strong>Reasoning:</strong> ${escapeHtml(ai?.reasoning || "Standard classification")}</p>
-          <p><strong>Confidence:</strong> ${ai ? Math.round(ai.confidence * 100) : 90}%</p>
-          <p><strong>Safety Hazard:</strong> ${ai?.safety_risk ? "⚠️ YES - Flagged" : "No immediate peril"}</p>
-          <p><strong>Urgency Tier:</strong> ${escapeHtml(ai?.urgency || "Standard")}</p>
-        </div>
-      </div>
+  col.appendChild(_buildAiAssessmentCard(ai));
+  return col;
+}
 
-      <div class="manage-actions">
-        <form id="manage-form">
-          <div class="form-group">
-            <label for="m-status">Target Status</label>
-            <select id="m-status" class="form-control" required>
-              <option value="Reported" ${issue.status === "Reported" ? "selected" : ""}>Reported</option>
-              <option value="In Progress" ${issue.status === "In Progress" ? "selected" : ""}>In Progress</option>
-              <option value="Resolved" ${issue.status === "Resolved" ? "selected" : ""}>Resolved</option>
-              <option value="Rejected" ${issue.status === "Rejected" ? "selected" : ""}>Rejected</option>
-              <option value="Duplicate" ${issue.status === "Duplicate" ? "selected" : ""}>Duplicate</option>
-            </select>
-          </div>
+function _buildAiAssessmentCard(ai) {
+  return h(
+    "div",
+    { className: "ai-analysis-card card" },
+    h("h4", {}, "🤖 AI Triage Assessment"),
+    h("p", {}, h("strong", {}, "Reasoning: "), ai?.reasoning || "Standard classification"),
+    h("p", {}, h("strong", {}, "Confidence: "), `${ai ? Math.round(ai.confidence * 100) : 90}%`),
+    h("p", {}, h("strong", {}, "Safety Hazard: "), ai?.safety_risk ? "⚠️ YES - Flagged" : "No immediate peril"),
+    h("p", {}, h("strong", {}, "Urgency Tier: "), ai?.urgency || "Standard")
+  );
+}
 
-          <div class="form-group">
-            <label for="m-note">Public Officer Note</label>
-            <textarea id="m-note" class="form-control" rows="2" placeholder="Explain status shift or inspection findings..."></textarea>
-          </div>
+function _buildManageActionsCol(issue, modal) {
+  const statuses = ["Reported", "In Progress", "Resolved", "Rejected", "Duplicate"];
+  const depts = [
+    "Roads & Highways", "Solid Waste Management", "Electricity & Street Lighting",
+    "Water Supply & Drainage", "Animal Control & Welfare", "Town Planning & Enforcement",
+    "Environmental Safety",
+  ];
+  const priorities = ["Critical", "High", "Medium", "Low"];
 
-          <div class="form-group">
-            <label for="m-dept-override">Department Override</label>
-            <select id="m-dept-override" class="form-control">
-              <option value="${escapeHtml(issue.department)}">Current: ${escapeHtml(issue.department)}</option>
-              <option value="Roads & Highways">Roads &amp; Highways</option>
-              <option value="Solid Waste Management">Solid Waste Management</option>
-              <option value="Electricity & Street Lighting">Electricity &amp; Street Lighting</option>
-              <option value="Water Supply & Drainage">Water Supply &amp; Drainage</option>
-              <option value="Animal Control & Welfare">Animal Control &amp; Welfare</option>
-              <option value="Town Planning & Enforcement">Town Planning &amp; Enforcement</option>
-              <option value="Environmental Safety">Environmental Safety</option>
-            </select>
-          </div>
+  const form = h(
+    "form",
+    { id: "manage-form" },
+    _buildSelectGroup("m-status", "Target Status", statuses.map((s) => ({ val: s, label: s, sel: s === issue.status }))),
+    h("div", { className: "form-group" },
+      h("label", { for: "m-note" }, "Public Officer Note"),
+      h("textarea", { id: "m-note", className: "form-control", rows: 2, placeholder: "Explain status shift or inspection findings..." })
+    ),
+    _buildSelectGroup("m-dept-override", "Department Override", [
+      { val: issue.department, label: `Current: ${issue.department}`, sel: true },
+      ...depts.filter((d) => d !== issue.department).map((d) => ({ val: d, label: d, sel: false })),
+    ]),
+    _buildSelectGroup("m-prio-override", "Priority Override", [
+      { val: issue.priority_level, label: `Current: ${issue.priority_level}`, sel: true },
+      ...priorities.filter((p) => p !== issue.priority_level).map((p) => ({ val: p, label: p, sel: false })),
+    ]),
+    h("div", { id: "m-alert", className: "alert hidden", role: "alert" }),
+    _buildManageFormActions(issue, modal)
+  );
 
-          <div class="form-group">
-            <label for="m-prio-override">Priority Override</label>
-            <select id="m-prio-override" class="form-control">
-              <option value="${escapeHtml(issue.priority_level)}">Current: ${escapeHtml(issue.priority_level)}</option>
-              <option value="Critical">Critical</option>
-              <option value="High">High</option>
-              <option value="Medium">Medium</option>
-              <option value="Low">Low</option>
-            </select>
-          </div>
+  _bindManageFormSubmit(form, issue, modal);
+  return h("div", { className: "manage-actions" }, form);
+}
 
-          <div id="m-alert" class="alert hidden" role="alert"></div>
+function _buildSelectGroup(id, label, options) {
+  return h(
+    "div",
+    { className: "form-group" },
+    h("label", { for: id }, label),
+    h(
+      "select",
+      { id, className: "form-control" },
+      ...options.map((o) => {
+        const props = { value: o.val };
+        if (o.sel) props.selected = true;
+        return h("option", props, o.label);
+      })
+    )
+  );
+}
 
-          <div class="form-actions-stacked">
-            <button type="submit" class="btn btn-primary btn-block">Save Updates &amp; Notify</button>
-            <button type="button" id="btn-reanalyze" class="btn btn-outline btn-block">⚡ Re-run AI Triage</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  `;
+function _buildManageFormActions(issue, modal) {
+  const reanalyzeBtn = h(
+    "button",
+    {
+      type: "button",
+      id: "btn-reanalyze",
+      className: "btn btn-outline btn-block",
+      onclick: async () => {
+        reanalyzeBtn.disabled = true;
+        reanalyzeBtn.textContent = "Re-analyzing with Gemini...";
+        try {
+          await api.reanalyzeIssue(issue.ticket_id);
+          modal.close();
+          await _loadAdminData();
+        } catch (err) {
+          const alertBox = document.getElementById("m-alert");
+          if (alertBox) {
+            clear(alertBox);
+            alertBox.textContent = err.message || "Failed to re-analyze";
+            alertBox.className = "alert alert-error";
+            alertBox.classList.remove("hidden");
+          }
+          reanalyzeBtn.disabled = false;
+          reanalyzeBtn.textContent = "⚡ Re-run AI Triage";
+        }
+      },
+    },
+    "⚡ Re-run AI Triage"
+  );
 
-  const form = document.getElementById("manage-form");
-  const alertBox = document.getElementById("m-alert");
+  return h(
+    "div",
+    { className: "form-actions-stacked" },
+    h("button", { type: "submit", className: "btn btn-primary btn-block" }, "Save Updates & Notify"),
+    reanalyzeBtn
+  );
+}
 
+function _bindManageFormSubmit(form, issue, modal) {
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
+    const alertBox = form.querySelector("#m-alert");
     alertBox.classList.add("hidden");
 
-    const statusVal = document.getElementById("m-status").value;
-    const noteVal = document.getElementById("m-note").value.trim();
-    const deptOverride = document.getElementById("m-dept-override").value;
-    const prioOverride = document.getElementById("m-prio-override").value;
+    const statusVal = form.querySelector("#m-status").value;
+    const noteVal = form.querySelector("#m-note").value.trim();
+    const deptOverride = form.querySelector("#m-dept-override").value;
+    const prioOverride = form.querySelector("#m-prio-override").value;
 
     try {
       await api.updateIssue(issue.ticket_id, {
@@ -367,38 +509,22 @@ function renderManageForm(container, issue, modal) {
         priority_override: prioOverride !== issue.priority_level ? prioOverride : undefined,
       });
       modal.close();
-      await loadAdminData();
+      await _loadAdminData();
     } catch (err) {
+      clear(alertBox);
       alertBox.textContent = err.message || "Failed to update issue";
       alertBox.className = "alert alert-error";
       alertBox.classList.remove("hidden");
     }
   });
-
-  const reanalyzeBtn = document.getElementById("btn-reanalyze");
-  if (reanalyzeBtn) {
-    reanalyzeBtn.addEventListener("click", async () => {
-      reanalyzeBtn.disabled = true;
-      reanalyzeBtn.textContent = "Re-analyzing with Gemini...";
-      try {
-        await api.reanalyzeIssue(issue.ticket_id);
-        modal.close();
-        await loadAdminData();
-      } catch (err) {
-        alertBox.textContent = err.message || "Failed to re-analyze";
-        alertBox.className = "alert alert-error";
-        alertBox.classList.remove("hidden");
-        reanalyzeBtn.disabled = false;
-        reanalyzeBtn.textContent = "⚡ Re-run AI Triage";
-      }
-    });
-  }
 }
 
-async function openSummaryModal() {
-  const contentNode = document.createElement("div");
-  contentNode.className = "summary-modal-content";
-  contentNode.innerHTML = `<div class="loading-spinner">Generating executive summary from live data...</div>`;
+async function _openSummaryModal() {
+  const contentNode = h(
+    "div",
+    { className: "summary-modal-content" },
+    h("div", { className: "loading-spinner" }, "Generating executive summary from live data...")
+  );
 
   openModal({
     title: "Executive Operational Summary",
@@ -408,25 +534,38 @@ async function openSummaryModal() {
 
   try {
     const res = await api.generateSummary();
-    contentNode.innerHTML = `
-      <div class="summary-body">
-        <p class="summary-text">${escapeHtml(res.summary).replace(/\n\n/g, "</p><p class='summary-text'>")}</p>
-      </div>
-      <div class="summary-footer">
-        <small class="text-muted">Generated by Google Gemini based on live municipal operational data.</small>
-      </div>
-    `;
+    clear(contentNode);
+    const paragraphs = (res.summary || "")
+      .split(/\n\n+/)
+      .map((p) => h("p", { className: "summary-text" }, p.trim()));
+
+    contentNode.appendChild(h("div", { className: "summary-body" }, ...paragraphs));
+    contentNode.appendChild(
+      h(
+        "div",
+        { className: "summary-footer" },
+        h("small", { className: "text-muted" }, "Generated by Google Gemini based on live municipal operational data.")
+      )
+    );
   } catch (err) {
-    contentNode.innerHTML = `<div class="alert alert-error">Failed to generate summary: ${err.message}</div>`;
+    clear(contentNode);
+    contentNode.appendChild(
+      h("div", { className: "alert alert-error" }, `Failed to generate summary: ${err.message}`)
+    );
   }
 }
 
-function escapeHtml(str) {
-  if (!str) return "";
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+function _getPriorityBadgeClass(priority) {
+  if (priority === "Critical") return "badge-critical";
+  if (priority === "High") return "badge-high";
+  if (priority === "Medium") return "badge-medium";
+  return "badge-low";
+}
+
+function _getStatusBadgeClass(status) {
+  if (status === "In Progress") return "badge-progress";
+  if (status === "Resolved") return "badge-resolved";
+  if (status === "Rejected") return "badge-rejected";
+  if (status === "Duplicate") return "badge-duplicate";
+  return "badge-reported";
 }
