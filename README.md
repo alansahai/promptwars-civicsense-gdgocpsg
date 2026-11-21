@@ -2,6 +2,13 @@
 
 > **AI-Powered Citizen Grievance Management, Automated Triage, and Municipal Resolution Platform**
 
+[![Live Deployment](https://img.shields.io/badge/Live%20Deployment-Vercel%20Active-success?style=for-the-badge&logo=vercel)](https://promptwars-civicsense-gdgocpsg.vercel.app/)
+[![GitHub Repository](https://img.shields.io/badge/GitHub-Repository-blue?style=for-the-badge&logo=github)](https://github.com/alansahai/promptwars-civicsense-gdgocpsg.git)
+
+- 🌐 **Live Deployed App URL**: [https://promptwars-civicsense-gdgocpsg.vercel.app/](https://promptwars-civicsense-gdgocpsg.vercel.app/)
+- 📦 **Public GitHub Repository**: [https://github.com/alansahai/promptwars-civicsense-gdgocpsg.git](https://github.com/alansahai/promptwars-civicsense-gdgocpsg.git)
+- 🔑 **Demo Officer Password**: `civic-demo-2026` *(displayed on the login card in the portal)*
+
 ![CivicResolve Platform Banner](public/favicon.svg)
 
 ---

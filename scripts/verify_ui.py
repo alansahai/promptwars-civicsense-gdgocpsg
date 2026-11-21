@@ -8,18 +8,19 @@ Uses Playwright Chromium to validate all citizen and administrative user flows:
 5. High-contrast accessibility toggle
 """
 
+import sys
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-BASE_URL = "http://127.0.0.1:8000"
+DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 SCREENSHOT_DIR = Path("docs/screenshots")
 SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def verify_browser_ui() -> None:
+def verify_browser_ui(base_url: str = DEFAULT_BASE_URL) -> None:
     print("\n=======================================================")
-    print("  CivicResolve Browser UI Automated Verification")
+    print(f"  CivicResolve Browser UI Verification: {base_url}")
     print("=======================================================\n")
 
     errors: list[str] = []
@@ -43,7 +44,7 @@ def verify_browser_ui() -> None:
 
         # 1. Report View
         print("[1/8] Verifying Citizen Report Flow (#/report) ...", end=" ")
-        page.goto(f"{BASE_URL}/#/report", wait_until="networkidle")
+        page.goto(f"{base_url}/#/report", wait_until="networkidle")
         page.wait_for_selector("#report-form")
         page.screenshot(path=str(SCREENSHOT_DIR / "01_report_view.png"))
         print("OK (Screenshot: 01_report_view.png)")
@@ -131,4 +132,5 @@ def verify_browser_ui() -> None:
 
 
 if __name__ == "__main__":
-    verify_browser_ui()
+    target = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_BASE_URL
+    verify_browser_ui(target)

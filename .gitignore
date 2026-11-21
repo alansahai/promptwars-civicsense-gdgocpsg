@@ -53,3 +53,8 @@ htmlcov/
 # OS specific
 Thumbs.db
 .DS_Store
+
+.vercel
+.env*
+
+*.pdf
