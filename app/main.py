@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.admin_routes import router as admin_router
@@ -131,6 +131,14 @@ async def validation_exception_handler(_request: Request, exc: RequestValidation
 # 6. Mount API Routers
 app.include_router(public_router)
 app.include_router(admin_router)
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon_endpoint() -> Response:
+    """Serve SVG favicon for legacy user-agents requesting favicon.ico."""
+    icon_path = Path(__file__).resolve().parent.parent / "public" / "favicon.svg"
+    return FileResponse(icon_path, media_type="image/svg+xml")
+
 
 # 7. Static files mount for local development
 public_dir = Path(__file__).resolve().parent.parent / "public"
