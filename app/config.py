@@ -28,7 +28,7 @@ class Settings(BaseSettings):
 
     # Google Gemini GenAI Settings
     gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
-    gemini_model: str = Field(default="gemini-2.5-flash", alias="GEMINI_MODEL")
+    gemini_model: str = Field(default="gemini-flash-lite-latest", alias="GEMINI_MODEL")
 
     # Administration Security Credentials
     admin_password: str = Field(default=DEFAULT_DEMO_ADMIN_PASSWORD, alias="ADMIN_PASSWORD")

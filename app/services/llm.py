@@ -4,9 +4,11 @@ Handles multimodal content, structured JSON outputs, timeouts,
 and automatic fallback when unconfigured or unreachable.
 """
 
+import asyncio
 import json
 import logging
-from typing import Any
+import time
+from typing import Any, Final
 
 from google import genai
 from google.genai import types
@@ -73,10 +75,19 @@ def _get_gemini_client() -> genai.Client | None:
         return None
 
 
+GEMINI_TOTAL_BUDGET_SECONDS: Final[float] = 8.0
+
+
 def _get_candidate_models(configured_model: str) -> list[str]:
     """Return prioritized list of Gemini models with resilient fallback."""
     candidates = [configured_model]
-    for fallback in ("gemini-2.5-flash-lite", "gemini-flash-latest"):
+    for fallback in (
+        "gemini-flash-lite-latest",
+        "gemini-3.5-flash-lite",
+        "gemini-3.8-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.5-flash",
+    ):
         if fallback not in candidates:
             candidates.append(fallback)
     return candidates
@@ -89,6 +100,7 @@ def _generate_with_retry(
     response_mime_type: str | None = None,
     temperature: float = 0.2,
     max_retries: int = 2,
+    deadline: float | None = None,
 ) -> str | None:
     """Execute Gemini generate_content call with retries and timeout."""
     client = _get_gemini_client()
@@ -105,6 +117,9 @@ def _generate_with_retry(
     models = _get_candidate_models(settings.gemini_model)
 
     for attempt in range(max_retries):
+        if deadline and time.monotonic() >= deadline:
+            logger.warning("Gemini time budget reached (attempt %d aborted)", attempt + 1)
+            break
         model_name = models[min(attempt, len(models) - 1)]
         try:
             response = client.models.generate_content(
@@ -118,6 +133,37 @@ def _generate_with_retry(
             # Handle transient upstream API network, quota or gateway errors
             logger.warning("Gemini attempt %d (%s) failed: %s", attempt + 1, model_name, exc)
     return None
+
+
+async def _execute_with_budget(
+    system_instruction: str,
+    contents: list[Any],
+    response_schema: type[BaseModel] | None = None,
+    response_mime_type: str | None = None,
+    temperature: float = 0.2,
+    max_retries: int = 2,
+    budget_seconds: float | None = None,
+) -> str | None:
+    """Execute Gemini generation with strict end-to-end deadline shared across attempts."""
+    limit = budget_seconds if budget_seconds is not None else GEMINI_TOTAL_BUDGET_SECONDS
+    deadline = time.monotonic() + limit
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(
+                _generate_with_retry,
+                system_instruction=system_instruction,
+                contents=contents,
+                response_schema=response_schema,
+                response_mime_type=response_mime_type,
+                temperature=temperature,
+                max_retries=max_retries,
+                deadline=deadline,
+            ),
+            timeout=limit,
+        )
+    except TimeoutError:
+        logger.warning("Gemini call exceeded total %.1fs budget; falling back to rules", limit)
+        return None
 
 
 def _parse_triage_payload(
@@ -167,7 +213,7 @@ async def analyze_report_with_gemini(
     if photo_bytes and photo_mime:
         contents.append(types.Part.from_bytes(data=photo_bytes, mime_type=photo_mime))
 
-    raw_text = _generate_with_retry(
+    raw_text = await _execute_with_budget(
         system_instruction=TRIAGE_SYSTEM_PROMPT,
         contents=contents,
         response_schema=GeminiTriageOutput,
@@ -205,13 +251,13 @@ async def generate_assistance(partial_text: str) -> dict[str, Any]:
         "Suggest a concise 5-8 word headline and up to 2 clarifying questions to make this report actionable."
     )
 
-    raw_text = _generate_with_retry(
+    raw_text = await _execute_with_budget(
         system_instruction="You are a civic grievance form assistant. Suggest an improved title and up to 2 brief questions.",
         contents=[prompt],
         response_schema=GeminiAssistOutput,
         response_mime_type="application/json",
         temperature=0.3,
-        max_retries=1,
+        max_retries=2,
     )
 
     if raw_text:
@@ -246,7 +292,7 @@ async def generate_executive_summary(stats_json: dict[str, Any]) -> tuple[str, b
         f"OPERATIONAL DATA:\n{json.dumps(stats_json, indent=2)}"
     )
 
-    raw_text = _generate_with_retry(
+    raw_text = await _execute_with_budget(
         system_instruction="You are a municipal grievance operations analyst.",
         contents=[prompt],
         temperature=0.2,
