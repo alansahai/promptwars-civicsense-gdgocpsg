@@ -90,8 +90,8 @@ def _verify_desktop_flow(browser, base_url: str, errors: list[str]) -> None:
     page.wait_for_timeout(500)
     print("OK (Status updated to In Progress)")
 
-    # 8. High Contrast & Summary Verification
-    print("[8/8] Testing Executive Summary & High Contrast ...", end=" ")
+    # 8. High Contrast, Large Text & Language Switcher
+    print("[8/8] Testing Summary, High Contrast, Large Text & i18n ...", end=" ")
     page.click("#btn-summary")
     page.wait_for_selector(".summary-modal-content", timeout=8000)
     page.screenshot(path=str(SCREENSHOT_DIR / "09_executive_summary.png"))
@@ -99,29 +99,50 @@ def _verify_desktop_flow(browser, base_url: str, errors: list[str]) -> None:
     page.wait_for_timeout(300)
     page.click("#btn-contrast")
     page.screenshot(path=str(SCREENSHOT_DIR / "10_high_contrast.png"))
-    print("OK (High contrast mode enabled)")
+    # Large Text Mode toggle
+    page.click("#btn-font")
+    # Multilingual switching
+    page.select_option("#lang-select", "ta")
+    page.wait_for_timeout(200)
+    assert page.evaluate("() => document.documentElement.lang") == "ta"
+    page.select_option("#lang-select", "hi")
+    page.wait_for_timeout(200)
+    assert page.evaluate("() => document.documentElement.lang") == "hi"
+    page.select_option("#lang-select", "en")
+    page.wait_for_timeout(200)
+    print("OK (High contrast, large text, and Tamil/Hindi verified)")
 
     context.close()
 
 
 def _verify_mobile_viewport(browser, base_url: str, errors: list[str]) -> None:
-    print("[Mobile 375px] Verifying Mobile Responsiveness ...", end=" ")
+    print("[Mobile 375px] Verifying Mobile Responsiveness across all views ...", end=" ")
     mobile_ctx = browser.new_context(viewport={"width": 375, "height": 667})
     m_page = mobile_ctx.new_page()
 
     m_page.on("console", lambda msg: errors.append(f"Mobile Console {msg.type}: {msg.text}") if msg.type == "error" else None)
     m_page.on("pageerror", lambda err: errors.append(f"Mobile PageError: {err.message}"))
 
+    # 1. Report View 375px
     m_page.goto(f"{base_url}/#/report", wait_until="networkidle")
     m_page.wait_for_selector("#report-form")
     m_page.screenshot(path=str(SCREENSHOT_DIR / "11_mobile_report_375px.png"))
 
+    # 2. Track View 375px
+    m_page.goto(f"{base_url}/#/track", wait_until="networkidle")
+    m_page.wait_for_selector("#track-form")
+
+    # 3. Dashboard View 375px
     m_page.goto(f"{base_url}/#/dashboard", wait_until="networkidle")
     m_page.wait_for_selector("#stats-grid")
     m_page.screenshot(path=str(SCREENSHOT_DIR / "12_mobile_dashboard_375px.png"))
 
+    # 4. Admin View 375px
+    m_page.goto(f"{base_url}/#/admin", wait_until="networkidle")
+    m_page.wait_for_selector("#admin-login-form")
+
     mobile_ctx.close()
-    print("OK (Verified 375px report and dashboard layouts)")
+    print("OK (Verified 375px report, track, dashboard, and admin layouts)")
 
 
 def verify_browser_ui(base_url: str = DEFAULT_BASE_URL) -> None:
