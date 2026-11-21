@@ -8,9 +8,8 @@ Uses Playwright Chromium to validate all citizen and administrative user flows:
 5. High-contrast accessibility toggle
 """
 
-import os
-import sys
 from pathlib import Path
+
 from playwright.sync_api import sync_playwright
 
 BASE_URL = "http://127.0.0.1:8000"
@@ -96,7 +95,7 @@ def verify_browser_ui() -> None:
         print("OK (Authenticated with demo password)")
 
         # 7. Manage Issue Modal & Lifecycle Transition
-        print(f"[7/8] Testing Management Modal & Status Progression ...", end=" ")
+        print("[7/8] Testing Management Modal & Status Progression ...", end=" ")
         page.click(".btn-manage >> nth=0")
         page.wait_for_selector(".manage-modal-content", timeout=8000)
         page.screenshot(path=str(SCREENSHOT_DIR / "08_manage_modal.png"))
