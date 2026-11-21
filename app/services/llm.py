@@ -235,12 +235,14 @@ def _fallback_executive_summary(stats_json: dict[str, Any]) -> str:
     )
 
 
-async def generate_executive_summary(stats_json: dict[str, Any]) -> str:
+async def generate_executive_summary(stats_json: dict[str, Any]) -> tuple[str, bool, str]:
     """Generate executive weekly summary grounded strictly in provided statistics."""
     prompt = (
         "You are the Chief Municipal Grievance Analyst. Generate a concise 3-paragraph executive operational "
-        "summary for city commissioners based ONLY on the following JSON operational data. "
-        "Highlight resolution throughput, critical department pressure points, and actionable resource recommendations.\n\n"
+        "summary for city commissioners based ONLY on the following JSON operational data.\n"
+        "Paragraph 1: Headline metrics and resolution throughput.\n"
+        "Paragraph 2: Operational bottlenecks, overdue backlogs, and department workload.\n"
+        "Paragraph 3: Specific actionable recommendations for commissioners.\n\n"
         f"OPERATIONAL DATA:\n{json.dumps(stats_json, indent=2)}"
     )
 
@@ -248,10 +250,10 @@ async def generate_executive_summary(stats_json: dict[str, Any]) -> str:
         system_instruction="You are a municipal grievance operations analyst.",
         contents=[prompt],
         temperature=0.2,
-        max_retries=1,
+        max_retries=2,
     )
 
     if raw_text and raw_text.strip():
-        return raw_text.strip()
+        return raw_text.strip(), True, "gemini"
 
-    return _fallback_executive_summary(stats_json)
+    return _fallback_executive_summary(stats_json), False, "rules"

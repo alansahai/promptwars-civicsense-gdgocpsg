@@ -1,5 +1,6 @@
 """Administrative management and decision support endpoints."""
 
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -121,8 +122,10 @@ async def create_executive_summary(
     analytics = await analytics_service.get_admin_analytics()
     combined = {**stats, **analytics}
 
-    summary = await generate_executive_summary(combined)
+    summary, ai_generated, source = await generate_executive_summary(combined)
     return {
         "summary": summary,
-        "generated_at": stats.get("city_name"),
+        "generated_at": datetime.now(UTC).isoformat(),
+        "ai_generated": ai_generated,
+        "analysis_source": source,
     }

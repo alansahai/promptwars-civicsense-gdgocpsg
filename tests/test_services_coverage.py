@@ -133,8 +133,10 @@ async def test_llm_gemini_success_and_fallback() -> None:
         assist = await generate_assistance("Short desc")
         assert assist["suggested_title"] is not None
 
-        summary = await generate_executive_summary({"total_issues": 10})
+        summary, is_ai, source = await generate_executive_summary({"total_issues": 10})
         assert "Civic Operations Summary" in summary
+        assert is_ai is False
+        assert source == "rules"
 
     # Test with mocked active Gemini client returning structured JSON
     mock_client = MagicMock()
@@ -156,5 +158,7 @@ async def test_llm_gemini_success_and_fallback() -> None:
         assist_res = await generate_assistance("Longer description of water pipeline leak")
         assert "suggested_title" in assist_res
 
-        summary_res = await generate_executive_summary({"total_issues": 5, "city_name": "TestCity"})
+        summary_res, is_ai_res, source_res = await generate_executive_summary({"total_issues": 5, "city_name": "TestCity"})
         assert "Big pothole" in summary_res or len(summary_res) > 10
+        assert is_ai_res is True
+        assert source_res == "gemini"
