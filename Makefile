@@ -1,13 +1,16 @@
-.PHONY: install test lint run format smoke
+.PHONY: install test lint typecheck run format smoke
 
 install:
 	pip install -r requirements-dev.txt
 
 test:
-	pytest -v --asyncio-mode=auto tests/
+	pytest -v --cov=app --cov-report=term-missing --cov-fail-under=90 tests/
 
 lint:
 	ruff check .
+
+typecheck:
+	mypy app/
 
 format:
 	ruff format .

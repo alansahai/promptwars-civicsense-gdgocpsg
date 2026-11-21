@@ -7,7 +7,7 @@
 1. **AI as an Assistant, Not an Oracle**: GenAI assesses unstructured natural language and attached photographic evidence, but critical municipal routing and prioritization decisions are governed by transparent, deterministic domain rules.
 2. **Zero-Configuration Fallback (Out-of-the-box Execution)**: The platform functions immediately upon cloning with no environment variables. If Google Gemini API credentials or cloud storage are missing, the system gracefully shifts to in-memory storage and multilingual heuristic classification without degrading core capabilities.
 3. **Thin Routes, Rich Domain**: All business logic (priority calculation, SLA tracking, duplicate correlation, lifecycle validation) resides in pure domain functions and services, making endpoints minimal and unit testing exhaustive.
-4. **Zero-Dependency Frontend**: Static HTML, modern CSS, and vanilla ES modules with inline SVG visualizations. No Node build pipeline, no external CDN dependencies, and guaranteed WCAG 2.1 AA accessibility.
+4. **Zero-Dependency Safe Frontend**: Static HTML, modern CSS, and vanilla ES modules with safe DOM element construction via `public/js/dom.js` (guaranteeing zero `innerHTML`). No Node build pipeline, no external CDN dependencies, and guaranteed WCAG 2.1 AA accessibility.
 
 ---
 
@@ -16,6 +16,7 @@
 ```mermaid
 flowchart TD
     subgraph Client ["Citizen & Admin Client (public/)"]
+        DOMBuilder["Safe DOM Builder (public/js/dom.js - Zero innerHTML)"]
         ReportUI["#/report (Grievance Submission & AI Assist)"]
         TrackUI["#/track (Ticket ID Status Tracker)"]
         DashUI["#/dashboard (Public Transparency & Inline SVG Charts)"]
@@ -24,6 +25,7 @@ flowchart TD
 
     subgraph API ["FastAPI HTTP Gateway (app/main.py)"]
         Middleware["GZip + CORS + Security Headers + CSP + Rate Limiter"]
+        DomainErrorHandler["Domain Exception Handler (app/domain/errors.py)"]
         PubAPI["Public API (/api/issues, /api/stats, /api/assist, /api/health)"]
         AdmAPI["Admin API (/api/admin/*)"]
     end
@@ -32,7 +34,9 @@ flowchart TD
         TriageSvc["Triage Orchestrator (triage.py)"]
         LLMSvc["Gemini Client (llm.py - google-genai SDK)"]
         FallbackSvc["Multilingual Rules Engine (fallback_classifier.py)"]
-        IssueSvc["Issue Lifecycle & Metrics (issue_service.py)"]
+        IssueSvc["Issue Use-Cases (issue_service.py)"]
+        StatsSvc["Public Stats & Trends (stats_service.py)"]
+        AnalyticsSvc["Workload & SLA Analytics (analytics_service.py)"]
         AuthSvc["HMAC Authentication (auth.py)"]
         SafetySvc["Prompt Injection Guard (safety.py)"]
         ImageSvc["Magic Byte Validator (image_utils.py)"]
@@ -43,10 +47,12 @@ flowchart TD
         DupEngine["Geospatial & Semantic Duplicates (duplicates.py)"]
         LifecycleSM["Status State Machine & SLA (lifecycle.py)"]
         TaxonomyDef["Taxonomy & Routing Matrix (taxonomy.py)"]
+        DomainErrors["Typed Exception Hierarchy (errors.py)"]
     end
 
     subgraph Persistence ["Storage Layer (app/repositories/)"]
         RepoFactory["Repository Factory (factory.py)"]
+        SeedData["Declarative SeedSpec Table (seed_data.py)"]
         MemRepo["InMemoryRepository (15 Seed Issues)"]
         UpstashRepo["UpstashRedisRepository (HTTP REST)"]
     end
@@ -61,6 +67,8 @@ flowchart TD
 
     Middleware --> TriageSvc
     Middleware --> IssueSvc
+    PubAPI --> StatsSvc
+    AdmAPI --> AnalyticsSvc
     AdmAPI --> AuthSvc
 
     TriageSvc --> SafetySvc
@@ -75,6 +83,7 @@ flowchart TD
     IssueSvc --> RepoFactory
     RepoFactory --> MemRepo
     RepoFactory --> UpstashRepo
+    MemRepo --> SeedData
 ```
 
 ---
@@ -184,11 +193,12 @@ When `GEMINI_API_KEY` is present, CivicResolve invokes Google Gemini via the off
 2. **Magic Byte Image Verification**: Prevents malicious file uploads by verifying true binary headers (`\xff\xd8\xff` for JPEG, `\x89PNG` for PNG, `RIFF...WEBP` for WebP). Rejects payloads $> 300\text{ KB}$.
 3. **Session Security**: Admin session tokens are signed using HMAC-SHA256 and stored in `httpOnly`, `SameSite=Strict`, `Secure` cookies with constant-time password comparisons (`hmac.compare_digest`).
 4. **CSRF Protection**: All state-modifying requests (`POST`, `PATCH`, `DELETE`) require custom anti-CSRF headers (`X-Civic-Admin: 1` and `X-Requested-With: XMLHttpRequest`).
-5. **Content Security Policy (CSP)**:
+5. **Hardened Content Security Policy (CSP)**:
    ```http
-   Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none';
+   Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none';
    ```
-6. **Rate Limiting**: Sliding window in-memory rate limiting by client IP (20 submissions/5 min, 6 login attempts/5 min).
+   No `unsafe-inline` styles or scripts are permitted anywhere in the policy.
+6. **Rate Limiting**: Sliding window in-memory rate limiting by verified client IP (`x-vercel-forwarded-for` with fallback to `x-forwarded-for`).
 7. **PII Minimization**: No phone numbers or emails collected. Coordinates rounded to 3 decimal places in logs to safeguard citizen privacy.
 
 ---
@@ -197,7 +207,7 @@ When `GEMINI_API_KEY` is present, CivicResolve invokes Google Gemini via the off
 
 CivicResolve abstracts persistence behind the `IssueRepository` Protocol (`app/repositories/base.py`):
 1. **InMemoryRepository (`app/repositories/memory.py`)**:
-   - Thread-safe in-memory store initialized with 15 deterministic realistic grievances in Coimbatore.
+   - Thread-safe in-memory store initialized from declarative `SeedSpec` definitions (`app/repositories/seed_data.py`) containing 15 realistic grievances in Coimbatore.
    - Separate image dictionary for lazy loading.
    - Selected automatically when Upstash credentials are not set.
 2. **UpstashRedisRepository (`app/repositories/upstash.py`)**:

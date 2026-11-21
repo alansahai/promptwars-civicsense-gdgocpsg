@@ -28,6 +28,10 @@ jobs:
         run: |
           ruff check .
 
-      - name: Run Pytest Suite
+      - name: Type Check with Mypy
         run: |
-          pytest -v --asyncio-mode=auto tests/
+          mypy app/
+
+      - name: Run Pytest Suite with Coverage Enforcement
+        run: |
+          pytest -v --cov=app --cov-report=term-missing --cov-fail-under=90 tests/
